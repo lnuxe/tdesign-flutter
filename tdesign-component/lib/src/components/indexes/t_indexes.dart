@@ -30,6 +30,8 @@ class TIndexes extends StatefulWidget {
     this.onChanged,
     this.onSelect,
     required this.builderContent,
+    this.builderLazyItems,
+    this.lazyItemCount,
     this.builderAnchor,
     this.builderIndex,
   }) : super(key: key);
@@ -73,6 +75,23 @@ class TIndexes extends StatefulWidget {
 
   /// 内容自定义构建
   final Widget? Function(BuildContext context, String index) builderContent;
+
+  /// 条目级懒构建：按分组索引构建组内条目，返回 null 结束该组。
+  ///
+  /// 提供本回调时，组内容改为 SliverList 按需构建（issue #687）：
+  /// 仅视口内条目参与 build/layout，大列表首屏与索引跳转不再整组
+  /// 一次性同步构建。与 [builderContent] 互斥，同时提供时忽略后者。
+  ///
+  /// 返回 null 表示该组条目已枚举完毕；返回的 Widget 不得依赖
+  /// 组级外层约束铺满（SliverList 会给每条施加横向约束）。
+  final Widget? Function(BuildContext context, String index, int item)?
+      builderLazyItems;
+
+  /// 各分组的条目数量；提供 [builderLazyItems] 时必须提供。
+  ///
+  /// SliverList 依赖计数收敛滚动几何（maxScrollExtent），
+  /// 计数缺失会导致滚动范围无限大、侧栏跳转失效。
+  final int Function(String index)? lazyItemCount;
 
   /// 锚点自定义构建
   final Widget? Function(
@@ -231,6 +250,7 @@ class _TIndexesState extends State<TIndexes> {
     final capsuleTheme = widget.capsuleTheme;
     final stickyOffset = widget.stickyOffset;
     final sticky = widget.sticky;
+    final builderLazyItems = widget.builderLazyItems;
     _anchorKeys.clear();
     _contentKeys.clear();
     return _indexList.map((e) {
@@ -259,19 +279,31 @@ class _TIndexesState extends State<TIndexes> {
             sticky: sticky,
           );
         },
-        sliver: SliverToBoxAdapter(
-          child: Builder(
-            builder: (context) {
-              _contentKeys[e] = context;
-              return Padding(
+        sliver: builderLazyItems == null
+            ? SliverToBoxAdapter(
+                child: Builder(
+                  builder: (context) {
+                    _contentKeys[e] = context;
+                    return Padding(
+                      padding: isPinnedOffset
+                          ? EdgeInsets.only(top: context.tTheme.spacer)
+                          : EdgeInsets.zero,
+                      child: widget.builderContent(context, e),
+                    );
+                  },
+                ),
+              )
+            : SliverPadding(
                 padding: isPinnedOffset
                     ? EdgeInsets.only(top: context.tTheme.spacer)
                     : EdgeInsets.zero,
-                child: widget.builderContent(context, e),
-              );
-            },
-          ),
-        ),
+                sliver: SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                    (context, item) => builderLazyItems(context, e, item),
+                    childCount: widget.lazyItemCount?.call(e),
+                  ),
+                ),
+              ),
       );
     }).toList();
   }
@@ -333,6 +365,23 @@ class _TIndexesState extends State<TIndexes> {
 
     /// isUp: 是否（手指）向上滑动
     final isUp = _indexList.indexOf(newIndex) > _indexList.indexOf(oldIndex);
+    // 懒构建模式下组内容按需构建，无法借 _contentKeys 的内容 RenderBox
+    // 步进定位；各组锚点始终存在，改用锚点直接定位（issue #687）。
+    if (widget.builderLazyItems != null) {
+      final anchorContext = _anchorKeys[newIndex];
+      if (anchorContext != null) {
+        Scrollable.ensureVisible(anchorContext).then((value) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted && currentTaskId == _scrollTaskId) {
+              _isAnimating = false;
+            }
+          });
+        });
+      } else {
+        _isAnimating = false; // coverage:ignore-line
+      }
+      return;
+    }
     if (isUp) {
       var index = oldIndex;
       final contentRenderBox =

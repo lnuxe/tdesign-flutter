@@ -1204,6 +1204,157 @@ void main() {
       controller.dispose();
     });
   });
+
+  group('TIndexes builderLazyItems 懒构建', () {
+    testWidgets('仅构建视口内条目，视口外条目不参与 build', (tester) async {
+      const indexes = ['A', 'B', 'C'];
+      const itemHeight = 60.0;
+      final builtItems = <String>[];
+      await tester.pumpWidget(
+        wrapWithTheme(
+          SizedBox(
+            height: 180,
+            width: 240,
+            child: TIndexes(
+              indexList: indexes,
+              builderContent: (context, index) =>
+                  const SizedBox(height: 220, child: Text('不应出现')),
+              builderLazyItems: (context, index, item) {
+                builtItems.add('$index$item');
+                return SizedBox(
+                  height: itemHeight,
+                  child: Text('$index-$item'),
+                );
+              },
+              lazyItemCount: (index) => 13,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      // 视口 180 高，锚点占一部分空间后可见条目有限；
+      // 26 个索引各自带锚点，绝不可能把三组全部条目都构建出来。
+      expect(find.text('不应出现'), findsNothing);
+      // 至少 A 组前若干条目已构建。
+      expect(builtItems, contains('A0'));
+      // 总构建数远小于全量（3 组 × 13 条目 = 39），验证惰性。
+      expect(builtItems.where((e) => e.startsWith('A')).length,
+          lessThan(13));
+    });
+
+    testWidgets('返回 null 结束组枚举，组高度收敛', (tester) async {
+      const indexes = ['A', 'B'];
+      await tester.pumpWidget(
+        wrapWithTheme(
+          SizedBox(
+            height: 200,
+            width: 240,
+            child: TIndexes(
+              indexList: indexes,
+              builderContent: (context, index) =>
+                  const SizedBox(height: 220, child: Text('不应出现')),
+              builderLazyItems: (context, index, item) {
+                if (item >= 3) {
+                  return null; // 每组只有 3 条
+                }
+                return SizedBox(
+                  height: 50,
+                  child: Text('$index-$item'),
+                );
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('A-0'), findsOneWidget);
+      expect(find.text('A-2'), findsOneWidget);
+      // item=3 返回 null 后不再继续枚举 item=4。
+      expect(find.text('A-3'), findsNothing);
+      expect(find.text('A-4'), findsNothing);
+      expect(find.text('不应出现'), findsNothing);
+    });
+
+    testWidgets('懒模式下侧栏选择与吸顶联动正常', (tester) async {
+      const indexes = ['A', 'B', 'C'];
+      String? selected;
+      await tester.pumpWidget(
+        wrapWithTheme(
+          SizedBox(
+            height: 180,
+            width: 240,
+            child: TIndexes(
+              indexList: indexes,
+              onSelect: (index) => selected = index,
+              builderContent: (context, index) =>
+                  const SizedBox(height: 220, child: Text('不应出现')),
+              builderLazyItems: (context, index, item) => SizedBox(
+                height: 80,
+                child: Text('条目-$index-$item'),
+              ),
+              lazyItemCount: (index) => 3,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      final cFinder = find.descendant(
+        of: find.byType(TIndexesList),
+        matching: find.text('C'),
+      );
+      await tester.tapAt(tester.getCenter(cFinder));
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump(const Duration(milliseconds: 500));
+
+      expect(selected, 'C');
+      final list = tester.widget<TIndexesList>(find.byType(TIndexesList));
+      expect(list.activeIndex.value, 'C');
+      // C 组进入视口后其条目开始构建。
+      expect(find.text('条目-C-0'), findsOneWidget);
+      expect(find.text('不应出现'), findsNothing);
+    });
+
+    testWidgets('胶囊主题下懒模式保留组顶部间距', (tester) async {
+      const indexes = ['A', 'B'];
+      await tester.pumpWidget(
+        wrapWithTheme(
+          SizedBox(
+            height: 180,
+            width: 240,
+            child: TIndexes(
+              indexList: indexes,
+              capsuleTheme: true,
+              builderContent: (context, index) =>
+                  const SizedBox(height: 220, child: Text('不应出现')),
+              builderLazyItems: (context, index, item) => SizedBox(
+                height: 60,
+                child: Text('$index-$item'),
+              ),
+              lazyItemCount: (index) => 3,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      // 懒模式下激活组仍应渲染 SliverPadding 包裹。
+      final sliverPaddingFinder = find.descendant(
+        of: find.byType(TIndexes),
+        matching: find.byType(SliverPadding),
+      );
+      expect(sliverPaddingFinder, findsOneWidget);
+      expect(find.text('不应出现'), findsNothing);
+    });
+  });
 }
 
 Finder _tTextFinder(String data) {
