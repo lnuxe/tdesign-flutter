@@ -1,0 +1,488 @@
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:tdesign_flutter_icons/tdesign_flutter_icons.dart' show TIcons;
+
+import '../../theme/t_colors.dart';
+import '../../theme/t_fonts.dart';
+import '../../theme/t_internal_material.dart';
+import '../../theme/t_radius.dart';
+import '../../theme/t_sizes.dart';
+import '../../theme/t_theme.dart';
+import '../text/t_text_resolve.dart';
+import '../text/t_text_styled.dart';
+import 't_search_bar_theme_data.dart';
+
+const double _kIconGap = 5;
+const double _kActionGap = 15;
+
+class TSearchBar extends StatefulWidget {
+  const TSearchBar({
+    super.key,
+    this.controller,
+    this.initialValue,
+    this.onChanged,
+    this.onSubmitted,
+    this.onFocusChanged,
+    this.enabled = true,
+    this.readOnly = false,
+    this.hintText,
+    this.actionText,
+    this.onActionPressed,
+    this.onClearPressed,
+    this.clearable = true,
+    this.autofocus = false,
+    this.inputType = TextInputType.text,
+    this.inputAction = TextInputAction.search,
+    this.maxLength,
+    this.maxCharacter,
+    this.inputFormatters,
+    this.variant,
+    this.textAlignment,
+    this.focusNode,
+  }) : assert(
+         controller == null || initialValue == null,
+         'controller 与 initialValue 不能同时设置',
+       ),
+       assert(
+         maxLength == null || maxCharacter == null,
+         'maxLength 与 maxCharacter 不能同时设置',
+       );
+
+  /// 文本控制器；与 initialValue 互斥。外部控制器由调用方释放，
+  /// 未提供时由组件创建并释放内部控制器。
+  final TextEditingController? controller;
+
+  /// 内部控制器的初始文本，仅初始化一次。
+  final String? initialValue;
+
+  /// 文本变化通知。
+  final ValueChanged<String>? onChanged;
+
+  /// 提交回调。
+  final ValueChanged<String>? onSubmitted;
+
+  /// 焦点变化通知。
+  final ValueChanged<bool>? onFocusChanged;
+
+  /// 是否可交互。
+  final bool enabled;
+
+  /// 是否只读。只读时仍可获得焦点和选择文字，但不显示清除按钮。
+  final bool readOnly;
+
+  /// 占位提示。
+  final String? hintText;
+
+  /// 右侧操作文案；为空时不占据布局空间。
+  final String? actionText;
+
+  /// 右侧操作点击回调。组件不会隐式清空输入或释放焦点。
+  final VoidCallback? onActionPressed;
+
+  /// 清除按钮点击回调；先清空 controller，再调用本回调，最后触发 onChanged('')。
+  final VoidCallback? onClearPressed;
+
+  /// 是否在存在文本、enabled 为 true 且非只读时显示清除按钮；无需聚焦。
+  final bool clearable;
+
+  /// 是否自动聚焦。
+  final bool autofocus;
+
+  /// 键盘类型。
+  final TextInputType inputType;
+
+  /// 键盘动作。
+  final TextInputAction inputAction;
+
+  /// 最大字符数；不显示 Material 计数器，与 maxCharacter 互斥。
+  final int? maxLength;
+
+  /// 最大加权字符数，ASCII 字符计 1，非 ASCII 字符计 2。
+  final int? maxCharacter;
+
+  /// 输入格式化器。
+  final List<TextInputFormatter>? inputFormatters;
+
+  /// 搜索框形态；未设置时为 [TSearchBarVariant.square]。
+  final TSearchBarVariant? variant;
+
+  /// 文本对齐方式，默认左对齐。
+  final TSearchBarAlignment? textAlignment;
+
+  /// 焦点节点；外部节点由调用方释放，未提供时由组件管理内部节点。
+  final FocusNode? focusNode;
+
+  @override
+  State<TSearchBar> createState() => _TSearchBarState();
+}
+
+class _TSearchBarState extends State<TSearchBar> {
+  late final TextEditingController _internalController;
+  late final FocusNode _internalFocusNode;
+  late TextEditingController _controller;
+  late FocusNode _focusNode;
+
+  bool _hasText = false;
+
+  TextEditingController get _effectiveController =>
+      widget.controller ?? _internalController;
+
+  FocusNode get _effectiveFocusNode => widget.focusNode ?? _internalFocusNode;
+
+  bool get _showClear =>
+      widget.clearable && widget.enabled && !widget.readOnly && _hasText;
+
+  @override
+  void initState() {
+    super.initState();
+    _internalController = TextEditingController(text: widget.initialValue);
+    _internalFocusNode = FocusNode();
+    _controller = _effectiveController;
+    _focusNode = _effectiveFocusNode;
+    _hasText = _controller.text.isNotEmpty;
+    _controller.addListener(_handleTextChanged);
+    _focusNode.addListener(_handleFocusChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant TSearchBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncController();
+    _syncFocusNode();
+  }
+
+  @override
+  void dispose() {
+    _controller.removeListener(_handleTextChanged);
+    _focusNode.removeListener(_handleFocusChanged);
+    _internalController.dispose();
+    _internalFocusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final token = context.tTheme;
+    final theme = Theme.of(context).extension<TSearchBarThemeData>();
+    final effectiveVariant = widget.variant ?? TSearchBarVariant.square;
+    final effectiveAlignment = widget.textAlignment ?? TSearchBarAlignment.left;
+    var height =
+        theme?.resolveHeight(context.tTheme.size12) ?? context.tTheme.size12;
+    final inputBackgroundColor =
+        theme?.inputBackgroundColor ?? token.bgColorSecondaryContainer;
+    final contentPadding =
+        theme?.resolveContentPadding(
+          EdgeInsets.symmetric(horizontal: token.size5),
+        ) ??
+        EdgeInsets.symmetric(horizontal: token.size5);
+    final actionText = widget.actionText;
+    final hasAction = actionText != null && actionText.isNotEmpty;
+
+    final bodyFont = token.fontBodyLarge;
+    final defaultTextStyle = TextStyle(
+      fontSize: bodyFont?.size ?? 16,
+      height: bodyFont?.height ?? 1.5,
+      fontWeight: bodyFont?.fontWeight ?? FontWeight.w400,
+      color: token.textColorPrimary,
+    );
+    final defaultHintStyle = defaultTextStyle.copyWith(
+      color: token.textColorPlaceholder,
+    );
+    final textStyle = defaultTextStyle
+        .merge(theme?.textStyle)
+        .copyWith(
+          color: widget.enabled
+              ? theme?.textStyle?.color ?? token.textColorPrimary
+              : token.textColorDisabled,
+        );
+    final hintStyle = defaultHintStyle
+        .merge(theme?.hintStyle)
+        .copyWith(
+          color: widget.enabled
+              ? theme?.hintStyle?.color ?? token.textColorPlaceholder
+              : token.textColorDisabled,
+        );
+    final actionStyle = defaultTextStyle
+        .copyWith(color: token.brandColor)
+        .merge(theme?.actionTextStyle)
+        .copyWith(
+          color: widget.enabled
+              ? theme?.actionTextStyle?.color ?? token.brandColor
+              : token.textColorDisabled,
+        );
+    var searchIconTheme =
+        IconThemeData(
+              size: context.tTheme.size8,
+              color: token.textColorPlaceholder,
+            )
+            .merge(theme?.searchIconTheme)
+            .copyWith(
+              size:
+                  theme?.resolveSearchIconSize(context.tTheme.size8) ??
+                  context.tTheme.size8,
+            );
+    var clearIconTheme =
+        IconThemeData(
+              size: context.tTheme.size8,
+              color: token.textColorPlaceholder,
+            )
+            .merge(theme?.clearIconTheme)
+            .copyWith(
+              size:
+                  theme?.resolveClearIconSize(context.tTheme.size8) ??
+                  context.tTheme.size8,
+            );
+    if (!widget.enabled) {
+      searchIconTheme = searchIconTheme.copyWith(
+        color: token.textColorDisabled,
+      );
+      clearIconTheme = clearIconTheme.copyWith(color: token.textColorDisabled);
+    }
+
+    if (theme?.hasHeightOverride != true) {
+      for (final style in [textStyle, hintStyle]) {
+        height = math.max(
+          height,
+          TTextStyled(
+                '国Ag',
+                maxLines: 1,
+                style: style,
+              ).naturalSize(context).height +
+              contentPadding.vertical,
+        );
+      }
+      if (hasAction) {
+        height = math.max(
+          height,
+          TTextStyled(
+            actionText,
+            style: actionStyle,
+          ).naturalSize(context).height,
+        );
+      }
+      height = math.max(
+        height,
+        math.max(
+              searchIconTheme.size ?? context.tTheme.size8,
+              clearIconTheme.size ?? context.tTheme.size8,
+            ) +
+            contentPadding.vertical,
+      );
+    }
+    return SizedBox(
+      height: height,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: inputBackgroundColor,
+                borderRadius: BorderRadius.circular(
+                  effectiveVariant == TSearchBarVariant.round
+                      ? height / 2
+                      : token.radiusDefault,
+                ),
+              ),
+              child: Padding(
+                padding: contentPadding,
+                child: Row(
+                  children: [
+                    TInternalIconTheme(
+                      data: searchIconTheme,
+                      child: const TInternalIcon(TIcons.search, size: 20),
+                    ),
+                    const SizedBox(width: _kIconGap),
+                    Expanded(
+                      child: TInternalMaterial(
+                        type: MaterialType.transparency,
+                        child: TInternalInputHint(
+                          controller: _controller,
+                          hintText: widget.hintText,
+                          hintStyle: hintStyle,
+                          textAlign:
+                              effectiveAlignment == TSearchBarAlignment.center
+                              ? TextAlign.center
+                              : TextAlign.left,
+                          child: TInternalEditor(
+                            child: TextField(
+                              contextMenuBuilder:
+                                  TInternalMaterialTheme.editorMenu,
+                              controller: _controller,
+                              focusNode: _focusNode,
+                              autofocus: widget.autofocus,
+                              enabled: widget.enabled,
+                              readOnly: widget.readOnly,
+                              onChanged: widget.onChanged,
+                              onSubmitted: widget.onSubmitted,
+                              keyboardType: widget.inputType,
+                              textInputAction: widget.inputAction,
+                              inputFormatters: [
+                                ...?widget.inputFormatters,
+                                if (widget.maxCharacter != null)
+                                  _SearchMaxCharacterFormatter(
+                                    widget.maxCharacter!,
+                                  ),
+                              ],
+                              maxLength: widget.maxLength,
+                              buildCounter:
+                                  (
+                                    _, {
+                                    required currentLength,
+                                    required isFocused,
+                                    required maxLength,
+                                  }) => null,
+                              cursorColor: token.brandColor,
+                              cursorHeight: theme?.cursorHeight,
+                              textAlignVertical: TextAlignVertical.center,
+                              textAlign:
+                                  effectiveAlignment ==
+                                      TSearchBarAlignment.center
+                                  ? TextAlign.center
+                                  : TextAlign.left,
+                              style: TTextResolve.resolve(
+                                context: context,
+                                singleLine: true,
+                                style: textStyle,
+                              ),
+                              strutStyle: TTextResolve.singleLineStrut(
+                                context: context,
+                                resolvedStyle: TTextResolve.resolve(
+                                  context: context,
+                                  singleLine: true,
+                                  style: textStyle,
+                                ),
+                                configuredStyle: textStyle,
+                              ),
+                              decoration: null,
+                              maxLines: 1,
+                              cursorOpacityAnimates: false,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    if (_showClear)
+                      Semantics(
+                        button: true,
+                        label: '清除',
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: _handleClear,
+                          child: SizedBox(
+                            width: 32,
+                            height: height,
+                            child: TInternalIconTheme(
+                              data: clearIconTheme,
+                              child: const TInternalIcon(
+                                TIcons.close_circle_filled,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (hasAction) ...[
+            SizedBox(width: theme?.actionGap ?? _kActionGap),
+            Semantics(
+              button: true,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: widget.enabled ? widget.onActionPressed : null,
+                child: SizedBox(
+                  height: height,
+                  child: Center(
+                    child: TTextStyled(actionText, style: actionStyle),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  void _syncController() {
+    final next = _effectiveController;
+    if (_controller == next) {
+      return;
+    }
+    _controller.removeListener(_handleTextChanged);
+    _controller = next;
+    _controller.addListener(_handleTextChanged);
+    _setHasText(_controller.text.isNotEmpty);
+  }
+
+  void _syncFocusNode() {
+    final next = _effectiveFocusNode;
+    if (_focusNode == next) {
+      return;
+    }
+    _focusNode.removeListener(_handleFocusChanged);
+    _focusNode = next;
+    _focusNode.addListener(_handleFocusChanged);
+  }
+
+  void _handleTextChanged() {
+    _setHasText(_controller.text.isNotEmpty);
+  }
+
+  void _handleFocusChanged() {
+    widget.onFocusChanged?.call(_focusNode.hasFocus);
+  }
+
+  void _setHasText(bool value) {
+    if (_hasText == value || !mounted) {
+      return;
+    }
+    setState(() => _hasText = value);
+  }
+
+  void _handleClear() {
+    _controller.clear();
+    widget.onClearPressed?.call();
+    widget.onChanged?.call('');
+  }
+}
+
+class _SearchMaxCharacterFormatter extends TextInputFormatter {
+  const _SearchMaxCharacterFormatter(this.maxCharacter);
+
+  final int maxCharacter;
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    if (newValue.composing.isValid && !newValue.composing.isCollapsed) {
+      return newValue;
+    }
+    var characterCount = 0;
+    var acceptedCodeUnits = 0;
+    for (final rune in newValue.text.runes) {
+      final nextCount = characterCount + (rune <= 0x7f ? 1 : 2);
+      if (nextCount > maxCharacter) {
+        break;
+      }
+      characterCount = nextCount;
+      acceptedCodeUnits += String.fromCharCode(rune).length;
+    }
+    if (acceptedCodeUnits == newValue.text.length) {
+      return newValue;
+    }
+    final text = newValue.text.substring(0, acceptedCodeUnits);
+    return TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+      composing: TextRange.empty,
+    );
+  }
+}

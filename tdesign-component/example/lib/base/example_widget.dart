@@ -1,0 +1,888 @@
+import 'dart:ui' show FlutterView;
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
+
+import '../provider/theme_mode_provider.dart';
+import 'example_base.dart';
+import 'example_code_viewer.dart';
+import 'example_route.dart';
+import 'notification_center.dart';
+
+const _demoTestModulesEnabled = bool.fromEnvironment(
+  'TDESIGN_DEMO_TEST_MODULES',
+  defaultValue: true,
+);
+
+var navBarkey = GlobalKey();
+
+/// 示例页面控件，建议每个页面返回一个ExampleWidget即可，不用独自封装
+class ExamplePage extends StatefulWidget {
+  const ExamplePage({
+    Key? key,
+    this.navBarKey,
+    required this.title,
+    this.navBarTitle,
+    this.desc = '',
+    required this.children,
+    this.itemMargin,
+    this.backgroundColor,
+    this.compactDemo = false,
+    required this.exampleCodeGroup,
+    this.test = const [],
+    this.scrollController,
+    this.floatingActionButton,
+    this.floatingActionButtonLocation,
+    this.floatingActionButtonAnimator,
+    this.showTestModule = true,
+  }) : assert(children.length > 0, 'children must have at least one'),
+       super(key: key);
+
+  /// 标题
+  final String title;
+
+  /// 导航栏标题。
+  ///
+  /// 为空时与页面内容标题 [title] 保持一致；设计稿区分导航栏短标题与页面完整标题时可单独指定。
+  final String? navBarTitle;
+
+  /// 示例组件模块列表
+  final List<ExampleModule> children;
+
+  /// 页面描述。
+  final String desc;
+
+  /// 普通布局中每个示例项的外边距。
+  final EdgeInsetsGeometry? itemMargin;
+
+  /// 使用紧凑的示例分组结构：说明条、白色示例块、连续字段行。
+  final bool compactDemo;
+
+  /// 背景颜色
+  final Color? backgroundColor;
+
+  /// 示例代码路径
+  final String exampleCodeGroup;
+
+  /// 测试组件列表
+  final List<ExampleItem> test;
+
+  /// 滚动控制组件
+  final ScrollController? scrollController;
+
+  /// 悬浮按钮
+  final Widget? floatingActionButton;
+
+  /// 悬浮按钮的布局位置。
+  final FloatingActionButtonLocation? floatingActionButtonLocation;
+
+  /// 悬浮按钮的位置过渡动画。
+  final FloatingActionButtonAnimator? floatingActionButtonAnimator;
+
+  /// 是否在 debug 模式展示仅用于内部验证的单元测试模块，默认展示。
+  ///
+  /// profile 和 release 构建中始终不展示。
+  /// 视觉测试通过 `--dart-define=TDESIGN_DEMO_TEST_MODULES=false` 统一隐藏，
+  /// 不改变本地 debug 的默认展示与页面开关。
+  final bool showTestModule;
+
+  /// 悬浮按钮
+  final GlobalKey? navBarKey;
+
+  @override
+  State<ExamplePage> createState() => _ExamplePageState();
+}
+
+class _ExamplePageState extends State<ExamplePage> with WidgetsBindingObserver {
+  late List<ExampleModule> list;
+  bool apiVisible = false;
+  ExamplePageModel? model;
+  bool showAction = false;
+  bool _showingCode = false;
+  late ScrollController _scrollController;
+  late bool _ownsScrollController;
+  FlutterView? _view;
+  double _keyboardInset = 0;
+  double? _scrollOffsetBeforeKeyboard;
+  bool _userScrolledWithKeyboard = false;
+  double? _keyboardDismissStartInset;
+  double? _scrollOffsetAtKeyboardDismissStart;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _setScrollController(widget.scrollController);
+    WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
+      var modelTheme = context
+          .dependOnInheritedWidgetOfExactType<ExamplePageInheritedTheme>();
+      model = modelTheme?.model;
+      model?.codePath = widget.exampleCodeGroup;
+      model?.apiVisible = apiVisible;
+      setState(() {
+        showAction = model?.showAction ?? false;
+      });
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final nextView = View.of(context);
+    if (!identical(_view, nextView)) {
+      _view = nextView;
+      _keyboardInset = _readKeyboardInset();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant ExamplePage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.scrollController != widget.scrollController) {
+      if (_ownsScrollController) {
+        _scrollController.dispose();
+      }
+      _setScrollController(widget.scrollController);
+      _scrollOffsetBeforeKeyboard = null;
+      _userScrolledWithKeyboard = false;
+      _cancelKeyboardRestore();
+    }
+  }
+
+  @override
+  void didChangeMetrics() {
+    final nextInset = _readKeyboardInset();
+    final wasVisible = _keyboardInset > 0;
+    final isVisible = nextInset > 0;
+    if (!wasVisible && isVisible && _scrollController.hasClients) {
+      _cancelKeyboardRestore();
+      _scrollOffsetBeforeKeyboard = _scrollController.offset;
+      _userScrolledWithKeyboard = false;
+    } else if (wasVisible &&
+        isVisible &&
+        nextInset < _keyboardInset &&
+        !_userScrolledWithKeyboard) {
+      final restoreOffset = _scrollOffsetBeforeKeyboard;
+      if (restoreOffset != null && _scrollController.hasClients) {
+        _keyboardDismissStartInset ??= _keyboardInset;
+        _scrollOffsetAtKeyboardDismissStart ??= _scrollController.offset;
+        final startInset = _keyboardDismissStartInset!;
+        final startOffset = _scrollOffsetAtKeyboardDismissStart!;
+        final remaining = (nextInset / startInset).clamp(0.0, 1.0);
+        _restoreKeyboardOffset(
+          restoreOffset + (startOffset - restoreOffset) * remaining,
+        );
+      }
+    } else if (wasVisible && isVisible && nextInset > _keyboardInset) {
+      _cancelKeyboardRestore();
+    } else if (wasVisible && !isVisible) {
+      final restoreOffset = _scrollOffsetBeforeKeyboard;
+      _scrollOffsetBeforeKeyboard = null;
+      if (!_userScrolledWithKeyboard && restoreOffset != null) {
+        _restoreKeyboardOffset(restoreOffset);
+      }
+      _keyboardDismissStartInset = null;
+      _scrollOffsetAtKeyboardDismissStart = null;
+    }
+    _keyboardInset = nextInset;
+  }
+
+  void _restoreKeyboardOffset(double target) {
+    if (_userScrolledWithKeyboard || !_scrollController.hasClients) {
+      return;
+    }
+    final position = _scrollController.position;
+    final clampedTarget = target.clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    if ((position.pixels - clampedTarget).abs() >= 0.5) {
+      _scrollController.jumpTo(clampedTarget);
+    }
+  }
+
+  void _cancelKeyboardRestore() {
+    _keyboardDismissStartInset = null;
+    _scrollOffsetAtKeyboardDismissStart = null;
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    if (_ownsScrollController) {
+      _scrollController.dispose();
+    }
+    super.dispose();
+  }
+
+  void _setScrollController(ScrollController? controller) {
+    _ownsScrollController = controller == null;
+    _scrollController = controller ?? ScrollController();
+  }
+
+  double _readKeyboardInset() {
+    final view = _view;
+    if (view == null) {
+      return 0;
+    }
+    return view.viewInsets.bottom / view.devicePixelRatio;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: widget.compactDemo
+          ? _compactBackgroundColor
+          : widget.backgroundColor,
+      floatingActionButton: widget.floatingActionButton,
+      floatingActionButtonLocation: widget.floatingActionButtonLocation,
+      floatingActionButtonAnimator: widget.floatingActionButtonAnimator,
+      body: ScrollbarTheme(
+        data: ScrollbarThemeData(
+          trackVisibility: WidgetStateProperty.all(true),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SafeArea(bottom: false, child: _buildNavBar()),
+            Expanded(child: SafeArea(top: false, child: _buildExampleList())),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildExampleList() {
+    final modules = [
+      ...widget.children,
+      if (kDebugMode && _demoTestModulesEnabled && widget.showTestModule)
+        ExampleModule(
+          title: '单元测试',
+          children: [_buildTestExampleItem(), ...widget.test],
+        ),
+    ];
+    final slivers = widget.compactDemo
+        ? _buildCompactSlivers(modules)
+        : _buildDefaultSlivers(modules);
+    return NotificationListener<ScrollStartNotification>(
+      onNotification: (notification) {
+        if (_keyboardInset > 0 && notification.dragDetails != null) {
+          _userScrolledWithKeyboard = true;
+          _cancelKeyboardRestore();
+        }
+        return false;
+      },
+      child: CustomScrollView(
+        controller: _scrollController,
+        physics: const BouncingScrollPhysics(),
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        slivers: slivers,
+      ),
+    );
+  }
+
+  List<Widget> _buildDefaultSlivers(List<ExampleModule> modules) {
+    return [
+      const SliverToBoxAdapter(child: SizedBox(height: 24)),
+      SliverToBoxAdapter(child: _buildHeader()),
+      for (
+        var moduleIndex = 0;
+        moduleIndex < modules.length;
+        moduleIndex++
+      ) ...[
+        SliverToBoxAdapter(
+          child: _buildModuleTitle(moduleIndex + 1, modules[moduleIndex]),
+        ),
+        SliverList.builder(
+          itemCount: modules[moduleIndex].children.length,
+          itemBuilder: (_, itemIndex) =>
+              _buildExampleItem(modules[moduleIndex], itemIndex),
+        ),
+      ],
+      const SliverToBoxAdapter(child: SizedBox(height: 24)),
+    ];
+  }
+
+  List<Widget> _buildCompactSlivers(List<ExampleModule> modules) {
+    final entries = <_CompactExampleEntry>[];
+    for (var moduleIndex = 0; moduleIndex < modules.length; moduleIndex++) {
+      final module = modules[moduleIndex];
+      for (var itemIndex = 0; itemIndex < module.children.length; itemIndex++) {
+        entries.add(
+          _CompactExampleEntry(
+            module: module,
+            moduleIndex: moduleIndex,
+            itemIndex: itemIndex,
+          ),
+        );
+      }
+    }
+    return [
+      SliverToBoxAdapter(child: _buildCompactHeader()),
+      SliverList.builder(
+        itemCount: entries.length,
+        itemBuilder: (_, index) => _buildCompactItem(entries[index]),
+      ),
+      const SliverToBoxAdapter(child: SizedBox(height: 32)),
+    ];
+  }
+
+  Widget _buildCompactItem(_CompactExampleEntry entry) {
+    final module = entry.module;
+    final moduleIndex = entry.moduleIndex;
+    final itemIndex = entry.itemIndex;
+    final item = module.children[itemIndex];
+    final hasTitle = itemIndex == 0 && module.title.isNotEmpty;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (hasTitle) SizedBox(height: moduleIndex == 0 ? 28 : 32),
+        if (hasTitle || item.desc.isNotEmpty)
+          Padding(
+            padding: EdgeInsets.fromLTRB(16, hasTitle ? 0 : 24, 16, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (hasTitle)
+                  Text(
+                    '${moduleIndex + 1 < 10 ? '0' : ''}${moduleIndex + 1} '
+                    '${module.title}',
+                    style: TextStyle(
+                      fontSize: context.tTheme.fontTitleLarge?.size,
+                      height: context.tTheme.fontTitleLarge?.height,
+                      fontWeight: context.tTheme.fontTitleLarge?.fontWeight,
+                      color: context.tTheme.textColorPrimary,
+                    ),
+                  ),
+                if (item.desc.isNotEmpty)
+                  Padding(
+                    padding: EdgeInsets.only(top: hasTitle ? 8 : 0),
+                    child: Text(
+                      item.desc,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: context.tTheme.textColorSecondary,
+                        fontSize: 14,
+                        height: 22 / 14,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        SizedBox(height: item.compactStyle.contentSpacing),
+        if (item.compactStyle.surface == CompactExampleSurface.container)
+          _CompactDemoSurface(child: _buildExampleContent(item))
+        else
+          _buildExampleContent(item),
+      ],
+    );
+  }
+
+  Widget _buildCompactHeader() {
+    return Container(
+      width: double.infinity,
+      color: _compactBackgroundColor,
+      padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            widget.title,
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+              color: context.tTheme.textColorPrimary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          if (widget.desc.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            TText(
+              widget.desc,
+              font: context.tTheme.fontBodyMedium,
+              style: TextStyle(color: context.tTheme.textColorSecondary),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Color get _compactBackgroundColor =>
+      widget.backgroundColor ??
+      (Theme.of(context).brightness == Brightness.light
+          ? const Color(0xFFF6F6F6)
+          : context.tTheme.bgColorPage);
+
+  ExampleItem _buildTestExampleItem() => ExampleItem(
+    desc: '''未在示例稿中体现，但有必要验证的组件样式，请添加到'test'参数中。以下情景必须有测试：
+  1.参数为数字。需测试数字为负数、0、较大数值的场景。
+  2.参数为枚举，需测试所有枚举组合（示例已有的可不写）''',
+    builder: (_) => const TDivider(),
+  );
+
+  Future<void> _showExampleCode() async {
+    if (_showingCode) {
+      return;
+    }
+    _showingCode = true;
+    try {
+      await ExampleCodeViewer.showExamples(context, widget.exampleCodeGroup);
+    } finally {
+      _showingCode = false;
+    }
+  }
+
+  Widget _buildNavBar() {
+    var leftBarItems = <TNavBarItem>[];
+    var rightBarItems = <TNavBarItem>[];
+    // 保留公共页面壳既有的 22/14 行高度量，同时避免继承可被宿主覆盖的
+    // Material bodyMedium，进而污染所有复用 ExamplePage 的组件 Golden。
+    final titleLineHeight = context.tTheme.fontBodyMedium?.height ?? 22 / 14;
+
+    // web端示例页不展示标题栏
+    if (PlatformUtil.isWeb && !Navigator.canPop(context)) {
+      return Container();
+    }
+    leftBarItems.add(
+      TNavBarItem(
+        icon: TIcons.chevron_left,
+        iconSize: 28,
+        onTap: () => Navigator.maybePop(context),
+      ),
+    );
+    if (showAction) {
+      // Web 端和移动端都显示 API 按钮
+      rightBarItems.add(
+        TNavBarItem(
+          icon: TIcons.info_circle,
+          onTap: () {
+            Navigator.pushNamed(context, TExampleRoute.getApiPath(model));
+          },
+        ),
+      );
+      rightBarItems.add(
+        TNavBarItem(
+          icon: TIcons.code,
+          onTap: _showExampleCode,
+        ),
+      );
+    }
+    if (!PlatformUtil.isWeb) {
+      var themeModeProvider = Provider.of<ThemeModeProvider>(context);
+      // 获取系统主题
+      // Brightness systemBrightness = MediaQuery.platformBrightnessOf(context);
+
+      leftBarItems.add(
+        TNavBarItem(
+          icon: themeModeProvider.themeMode == ThemeMode.light
+              ? TIcons.mode_light
+              : TIcons.mode_dark,
+          onTap: () {
+            themeModeProvider.themeMode =
+                themeModeProvider.themeMode == ThemeMode.light
+                ? ThemeMode.dark
+                : ThemeMode.light;
+          },
+        ),
+      );
+    }
+
+    return TNavBar(
+      key: widget.navBarKey,
+      title: Text(
+        widget.navBarTitle ?? widget.title,
+        style: TextStyle(
+          fontSize: 16,
+          height: titleLineHeight,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+      leading: leftBarItems,
+      actions: rightBarItems,
+      // ExamplePage 的公共壳层自行持有标题视觉，避免组件默认值调整时
+      // 污染所有其他组件的 Demo 与 Golden。
+      useDefaultBack: false,
+      // ExamplePage 外层 SafeArea 已负责顶部避让。
+      useSafeArea: false,
+    );
+  }
+
+  Widget _buildHeader() {
+    return Container(
+      margin: const EdgeInsets.only(left: 16, right: 16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            widget.title,
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+              color: context.tTheme.textColorPrimary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          Container(
+            margin: const EdgeInsets.only(top: 8),
+            child: TText(
+              widget.desc,
+              font: context.tTheme.fontBodyMedium,
+              style: TextStyle(color: context.tTheme.textColorSecondary),
+            ),
+          ),
+          // Expanded(child: ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildModuleTitle(int index, ExampleModule data) {
+    return Container(
+      margin: const EdgeInsets.only(left: 16, right: 16, top: 32),
+      child: Text(
+        '${index < 10 ? "0$index" : index} ${data.title}',
+        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+          color: context.tTheme.textColorPrimary,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildExampleItem(ExampleModule data, int index) {
+    return Container(
+      margin: widget.itemMargin,
+      child: ExampleItemWidget(data: data.children[index], index: index),
+    );
+  }
+
+  Widget _buildExampleContent(ExampleItem data) {
+    Widget child;
+    if (data.ignoreCode) {
+      child = data.builder(context);
+      if (data.center) {
+        child = Center(child: child);
+      }
+    } else {
+      child = CodeWrapper(
+        builder: data.builder,
+        methodName: data.methodName,
+        isCenter: data.center,
+      );
+    }
+    if (data.padding != null) {
+      child = Padding(padding: data.padding!, child: child);
+    }
+    if (data.key != null) {
+      child = RepaintBoundary(key: data.key, child: child);
+    }
+    return child;
+  }
+}
+
+class _CompactExampleEntry {
+  const _CompactExampleEntry({
+    required this.module,
+    required this.moduleIndex,
+    required this.itemIndex,
+  });
+
+  final ExampleModule module;
+  final int moduleIndex;
+  final int itemIndex;
+}
+
+/// 紧凑 Demo 中承载透明组件的容器色表面。
+class _CompactDemoSurface extends StatelessWidget {
+  const _CompactDemoSurface({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) =>
+      ColoredBox(color: context.tTheme.bgColorContainer, child: child);
+}
+
+/// 示例模块
+class ExampleModule {
+  const ExampleModule({required this.title, required this.children});
+
+  final String title;
+
+  final List<ExampleItem> children;
+}
+
+/// 示例样例数据
+class ExampleItem {
+  const ExampleItem({
+    this.key,
+    this.desc = '',
+    required this.builder,
+    this.methodName,
+    this.center = true,
+    this.ignoreCode = false,
+    this.padding,
+    this.compactStyle = const CompactExampleStyle(),
+  });
+
+  /// Demo 内容的稳定定位与视觉快照边界。
+  final Key? key;
+
+  final String desc;
+
+  final WidgetBuilder builder;
+
+  final String? methodName;
+
+  final bool center;
+
+  final bool ignoreCode;
+
+  final EdgeInsetsGeometry? padding;
+
+  /// 紧凑 Demo 专属的页面壳布局配置。
+  final CompactExampleStyle compactStyle;
+}
+
+/// 紧凑 Demo 的页面壳布局配置。
+@immutable
+class CompactExampleStyle {
+  const CompactExampleStyle({
+    this.contentSpacing = 16,
+    this.surface = CompactExampleSurface.transparent,
+  });
+
+  const CompactExampleStyle.surface({this.contentSpacing = 16})
+    : surface = CompactExampleSurface.container;
+
+  /// 说明文字与示例内容之间的间距。
+  final double contentSpacing;
+
+  /// 示例内容使用的页面壳表面。
+  final CompactExampleSurface surface;
+}
+
+/// 紧凑 Demo 示例内容的页面壳表面类型。
+enum CompactExampleSurface {
+  /// 保留示例内容自身背景。
+  transparent,
+
+  /// 使用 TDesign 容器背景承载透明组件。
+  container,
+}
+
+/// 组件示例
+class ExampleItemWidget extends StatefulWidget {
+  const ExampleItemWidget({required this.data, Key? key, required this.index})
+    : super(key: key);
+
+  final ExampleItem data;
+  final int index;
+
+  @override
+  State<ExampleItemWidget> createState() => _ExampleItemWidgetState();
+}
+
+class _ExampleItemWidgetState extends State<ExampleItemWidget> {
+  @override
+  Widget build(BuildContext context) {
+    Widget child;
+    if (widget.data.ignoreCode) {
+      child = widget.data.builder(context);
+      if (widget.data.center) {
+        child = Center(child: child);
+      }
+    } else {
+      child = CodeWrapper(
+        builder: widget.data.builder,
+        methodName: widget.data.methodName,
+        isCenter: widget.data.center,
+      );
+    }
+    if (widget.data.padding != null) {
+      child = Padding(padding: widget.data.padding!, child: child);
+    }
+    if (widget.data.key != null) {
+      child = RepaintBoundary(key: widget.data.key, child: child);
+    }
+    child = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: widget.data.center
+          ? CrossAxisAlignment.center
+          : CrossAxisAlignment.start,
+      children: [
+        widget.data.desc.isEmpty
+            ? Container()
+            : Container(
+                alignment: Alignment.topLeft,
+                margin: EdgeInsets.only(
+                  left: 16,
+                  right: 16,
+                  top: widget.index == 0 ? 8 : 24,
+                  bottom: 16,
+                ),
+                child: TText(
+                  widget.data.desc,
+                  font: context.tTheme.fontBodyMedium,
+                  style: TextStyle(color: context.tTheme.textColorSecondary),
+                ),
+              ),
+        child,
+      ],
+    );
+    return child;
+  }
+}
+
+class CodeWrapper extends StatefulWidget {
+  const CodeWrapper({
+    Key? key,
+    required this.builder,
+    this.methodName,
+    this.isCenter = false,
+  }) : super(key: key);
+
+  final WidgetBuilder builder;
+
+  final bool isCenter;
+
+  final String? methodName;
+
+  @override
+  State<CodeWrapper> createState() => _CodeWrapperState();
+}
+
+class _CodeWrapperState extends State<CodeWrapper> {
+  static const _apiVisibilityEvent = 'onApiVisibleChange';
+
+  bool apiVisible = false;
+
+  String exampleCodeGroup = '';
+
+  String? codeString;
+
+  String? _observerId;
+
+  @override
+  void initState() {
+    super.initState();
+    _observerId = TNotification.addObserver(_apiVisibilityEvent, (arguments) {
+      if (mounted && arguments is Map) {
+        setState(() {
+          apiVisible = arguments['apiVisible'] ?? false;
+        });
+      }
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        var modelTheme = context
+            .dependOnInheritedWidgetOfExactType<ExamplePageInheritedTheme>();
+        exampleCodeGroup = modelTheme?.model.codePath ?? '';
+        apiVisible = modelTheme?.model.apiVisible ?? false;
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    TNotification.removeObserver(_apiVisibilityEvent, _observerId);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    var child = widget.builder(context);
+    if (widget.isCenter) {
+      child = Center(child: child);
+    }
+    return Stack(
+      fit: StackFit.passthrough,
+      children: [
+        child,
+        if (apiVisible)
+          Positioned(
+            top: 0,
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: GestureDetector(
+              onTap: _showCodePanel,
+              child: Container(
+                color: Colors.black.withValues(alpha: 0.4),
+                alignment: Alignment.center,
+                child: TText(
+                  'code',
+                  style: TextStyle(color: context.tTheme.whiteColor1),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  String _getCodeAssetsPath() {
+    var methodName = widget.methodName ?? '';
+
+    var builderString = widget.builder.toString();
+    if (methodName.isEmpty) {
+      if (builderString.contains('\'')) {
+        var strings = builderString.split('\'');
+        if (strings.length > 1) {
+          methodName = strings[1];
+          if (methodName.isNotEmpty && methodName.contains('@')) {
+            methodName = methodName.split('@')[0];
+          }
+        }
+      }
+    }
+    if (methodName.isNotEmpty && exampleCodeGroup.isNotEmpty) {
+      debugPrint('example code methodName: $methodName');
+      return 'assets/code/${exampleCodeGroup}.$methodName.txt';
+    }
+    return '';
+  }
+
+  void _showCodePanel() async {
+    codeString ??= await loadCodeString();
+    if (mounted) {
+      await ExampleCodeViewer.showCodeString(context, codeString!);
+    }
+  }
+
+  Future<String> loadCodeString() async {
+    final assetsPath = _getCodeAssetsPath();
+    if (assetsPath.isEmpty) {
+      return '';
+    }
+    try {
+      return await rootBundle.loadString(assetsPath);
+    } catch (error) {
+      debugPrint('Failed to load example code asset $assetsPath: $error');
+      // 让代码面板走“暂无演示代码”分支，而不是将 null 强制解包导致页面异常。
+      return '';
+    }
+  }
+}
+
+/// State获取标题的扩展
+extension TStateExs on State {
+  String tTitle() {
+    var modelTheme = context
+        .dependOnInheritedWidgetOfExactType<ExamplePageInheritedTheme>();
+    return modelTheme?.model.text ?? '';
+  }
+}
+
+/// StatelessWidget获取标题的扩展
+extension TWidgetExs on StatelessWidget {
+  String tTitle(BuildContext context) {
+    var modelTheme = context
+        .dependOnInheritedWidgetOfExactType<ExamplePageInheritedTheme>();
+    return modelTheme?.model.text ?? '';
+  }
+}

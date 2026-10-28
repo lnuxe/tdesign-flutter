@@ -1,0 +1,566 @@
+import 'package:flutter/rendering.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:tdesign_flutter/src/components/divider/t_divider_painter.dart';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
+
+import '../../helpers/text_slot_regression.dart';
+
+/// TDivider Widget 测试
+///
+/// 覆盖 layout×child 组合、align 三档、dashed 横向/竖线忽略、
+/// Theme 各字段、resolve 优先级、0.2 迁移验证。
+void main() {
+  registerNativeParagraphContractTests(
+    'Divider label slot',
+    (child) => TDivider(child: child),
+    reset: false,
+  );
+
+  registerTextSlotParityTests(
+    'Divider label slot',
+    (child) => TDivider(child: child),
+  );
+
+  dividerTypographyOwnershipTests();
+
+  /// 用 TTheme 包裹以提供基础 Token
+  Widget wrapWithTheme(Widget child, {TDividerThemeData? dividerTheme}) {
+    final themeExtensions = <ThemeExtension>[
+      if (dividerTheme != null) dividerTheme,
+    ];
+    // 注意：必须通过 MaterialApp.theme 传递 extensions，
+    // 用外层 Theme 包 MaterialApp 会被 MaterialApp 默认 ThemeData.light() 覆盖，导致 extension 丢失。
+    return MaterialApp(
+      theme: ThemeData(
+        extensions: [TThemeData.defaultData(), ...themeExtensions],
+      ),
+      home: Scaffold(body: child),
+    );
+  }
+
+  group('TDivider 基础渲染', () {
+    testWidgets('默认水平分割线 - 模式 A', (tester) async {
+      await tester.pumpWidget(wrapWithTheme(const TDivider()));
+      expect(find.byType(TDivider), findsOneWidget);
+      expect(tester.getSize(find.byType(TDivider)).height, 20.5);
+    });
+
+    testWidgets('水平分割线 + child - 模式 B', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(const TDivider(child: Text('文字信息'))),
+      );
+      expect(find.text('文字信息'), findsOneWidget);
+    });
+
+    testWidgets('长中间内容在窄宽度下可换行且不溢出', (tester) async {
+      const longText = '这是用于验证分割线中间内容在窄屏下不会横向溢出的长文案';
+      await tester.pumpWidget(
+        wrapWithTheme(
+          const SizedBox(width: 160, child: TDivider(child: Text(longText))),
+        ),
+      );
+
+      expect(tester.takeException(), isNull);
+      final textBox = tester.getRect(find.text(longText));
+      expect(textBox.width, lessThanOrEqualTo(160));
+    });
+
+    testWidgets('竖线分割线', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(const TDivider(layout: TDividerLayout.vertical)),
+      );
+      expect(find.byType(TDivider), findsOneWidget);
+      expect(tester.getSize(find.byType(TDivider)).height, 14);
+      expect(tester.getSize(find.byType(TDivider)).width, 32.5);
+    });
+
+    testWidgets('竖线 + child 时 child 不渲染', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          const TDivider(layout: TDividerLayout.vertical, child: Text('不该出现')),
+        ),
+      );
+      expect(find.text('不该出现'), findsNothing);
+    });
+
+    testWidgets('竖线时 dashed 被忽略', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          const TDivider(layout: TDividerLayout.vertical, dashed: true),
+        ),
+      );
+      expect(find.byType(TDivider), findsOneWidget);
+    });
+  });
+
+  group('TDivider align 三档', () {
+    testWidgets('align: left', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          const TDivider(child: Text('左对齐'), align: TDividerAlign.left),
+        ),
+      );
+      expect(find.text('左对齐'), findsOneWidget);
+    });
+
+    testWidgets('align: center（默认）', (tester) async {
+      await tester.pumpWidget(wrapWithTheme(const TDivider(child: Text('居中'))));
+      expect(find.text('居中'), findsOneWidget);
+    });
+
+    testWidgets('align: right', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          const TDivider(child: Text('右对齐'), align: TDividerAlign.right),
+        ),
+      );
+      expect(find.text('右对齐'), findsOneWidget);
+    });
+
+    testWidgets('宽屏下三档对齐的线与内容占满可用宽度', (tester) async {
+      for (final align in TDividerAlign.values) {
+        await tester.pumpWidget(
+          wrapWithTheme(
+            SizedBox(
+              width: 600,
+              child: TDivider(child: const Text('文字信息'), align: align),
+            ),
+          ),
+        );
+
+        final row = tester.renderObject<RenderFlex>(
+          find.descendant(
+            of: find.byType(TDivider),
+            matching: find.byType(Row),
+          ),
+        );
+        var occupiedWidth = 0.0;
+        var child = row.firstChild;
+        while (child != null) {
+          occupiedWidth += child.size.width;
+          child = (child.parentData! as FlexParentData).nextSibling;
+        }
+        expect(occupiedWidth, closeTo(row.size.width, 0.01));
+      }
+    });
+  });
+
+  group('TDivider dashed', () {
+    testWidgets('横向虚线 — CustomPaint 渲染', (tester) async {
+      await tester.pumpWidget(wrapWithTheme(const TDivider(dashed: true)));
+      // TTheme 自身也包含 CustomPaint，这里验证至少渲染了 Divider 的 CustomPaint
+      expect(find.byType(CustomPaint), findsWidgets);
+      expect(find.byType(TDivider), findsOneWidget);
+    });
+
+    testWidgets('横向虚线 + child', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(const TDivider(dashed: true, child: Text('虚线文字'))),
+      );
+      expect(find.byType(CustomPaint), findsWidgets);
+      expect(find.text('虚线文字'), findsOneWidget);
+    });
+
+    testWidgets('默认不虚线 — 无虚线 CustomPaint', (tester) async {
+      await tester.pumpWidget(wrapWithTheme(const TDivider()));
+      // 验证 TDivider 正常渲染且不是虚线（实线用 Container 而非 CustomPaint）
+      expect(find.byType(TDivider), findsOneWidget);
+    });
+  });
+
+  group('TDivider Theme', () {
+    testWidgets('Theme.color 应用', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          dividerTheme: const TDividerThemeData(color: Colors.red),
+          const TDivider(),
+        ),
+      );
+      expect(find.byType(TDivider), findsOneWidget);
+    });
+
+    testWidgets('Theme.indent 应用', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          dividerTheme: const TDividerThemeData(indent: 16),
+          const TDivider(),
+        ),
+      );
+      expect(find.byType(TDivider), findsOneWidget);
+    });
+
+    testWidgets('Theme.endIndent 应用', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          dividerTheme: const TDividerThemeData(endIndent: 24),
+          const TDivider(),
+        ),
+      );
+      expect(find.byType(TDivider), findsOneWidget);
+    });
+
+    testWidgets('Theme.margin 应用', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          dividerTheme: const TDividerThemeData(margin: EdgeInsets.all(10)),
+          const TDivider(),
+        ),
+      );
+      expect(find.byType(Padding), findsWidgets);
+    });
+
+    testWidgets('Theme.gapPadding 默认值', (tester) async {
+      await tester.pumpWidget(wrapWithTheme(const TDivider(child: Text('内容'))));
+      final gapPadding = tester.widget<Padding>(
+        find.descendant(
+          of: find.byType(TDivider),
+          matching: find.byWidgetPredicate(
+            (widget) =>
+                widget is Padding &&
+                widget.padding == const EdgeInsets.symmetric(horizontal: 12),
+          ),
+        ),
+      );
+      expect(gapPadding.padding, const EdgeInsets.symmetric(horizontal: 12));
+    });
+
+    testWidgets('Material DividerTheme 不覆盖 TDesign 分割线', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData(
+            dividerTheme: const DividerThemeData(
+              color: Colors.orange,
+              space: 24,
+            ),
+            extensions: [TThemeData.defaultData()],
+          ),
+          home: const Scaffold(body: TDivider()),
+        ),
+      );
+
+      final coloredBox = tester.widget<ColoredBox>(
+        find.descendant(
+          of: find.byType(TDivider),
+          matching: find.byType(ColoredBox),
+        ),
+      );
+      expect(coloredBox.color, TThemeData.defaultData().borderLevel1Color);
+      expect(tester.getSize(find.byType(TDivider)).height, isNot(24));
+    });
+
+    testWidgets('默认内容使用 bodySmall / placeholder Token', (tester) async {
+      final token = TThemeData.defaultData();
+      await tester.pumpWidget(
+        wrapWithTheme(const TDivider(child: Text('内容样式'))),
+      );
+      final style = DefaultTextStyle.of(
+        tester.element(find.text('内容样式')),
+      ).style;
+      expect(style.fontSize, 12);
+      expect(style.height, 20 / 12);
+      expect(style.color, token.textColorPlaceholder);
+    });
+
+    testWidgets('Theme.gapPadding 自定义', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          dividerTheme: const TDividerThemeData(
+            gapPadding: EdgeInsets.symmetric(horizontal: 20),
+          ),
+          const TDivider(child: Text('间距')),
+        ),
+      );
+      expect(find.text('间距'), findsOneWidget);
+    });
+  });
+
+  group('TDivider 构造器覆盖 Theme', () {
+    testWidgets('dashed 构造器参数覆盖默认值', (tester) async {
+      await tester.pumpWidget(wrapWithTheme(const TDivider(dashed: true)));
+      expect(find.byType(CustomPaint), findsWidgets);
+      expect(find.byType(TDivider), findsOneWidget);
+    });
+
+    testWidgets('layout 构造器参数覆盖默认 horizontal', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(const TDivider(layout: TDividerLayout.vertical)),
+      );
+      expect(find.byType(TDivider), findsOneWidget);
+      expect(tester.getSize(find.byType(TDivider)).height, 14);
+    });
+  });
+
+  group('TDividerThemeData copyWith 和 lerp', () {
+    test('copyWith 部分覆盖', () {
+      const theme = TDividerThemeData(color: Colors.red, thickness: 2);
+      final copied = theme.copyWith(thickness: 5);
+      expect(copied.color, Colors.red);
+      expect(copied.thickness, 5);
+    });
+
+    test('copyWith 不覆盖时保持原值', () {
+      const theme = TDividerThemeData(color: Colors.blue);
+      final copied = theme.copyWith();
+      expect(copied.color, Colors.blue);
+      expect(copied.thickness, null);
+    });
+
+    test('lerp 前半段取 a 的值', () {
+      const a = TDividerThemeData(color: Colors.red, thickness: 1);
+      const b = TDividerThemeData(color: Colors.blue, thickness: 5);
+      final result = a.lerp(b, 0.3);
+      expect(result.color, Colors.red);
+      expect(result.thickness! > 0, true);
+    });
+
+    test('lerp 后半段取 b 的值', () {
+      const a = TDividerThemeData(color: Colors.red, thickness: 1);
+      const b = TDividerThemeData(color: Colors.blue, thickness: 5);
+      final result = a.lerp(b, 0.7);
+      expect(result.color, Colors.blue);
+      expect(result.thickness! > 1, true);
+    });
+
+    test('lerp 非 TDividerThemeData 返回自身', () {
+      const theme = TDividerThemeData(color: Colors.red);
+      final result = theme.lerp(null, 0.5);
+      expect(result.color, Colors.red);
+    });
+  });
+
+  group('TDivider 边界情况', () {
+    testWidgets('child 为 null 时模式 A 正常渲染', (tester) async {
+      await tester.pumpWidget(wrapWithTheme(const TDivider()));
+      expect(find.byType(TDivider), findsOneWidget);
+    });
+
+    testWidgets('layout 为 null 时默认 horizontal', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(const TDivider(child: Text('默认横线'))),
+      );
+      expect(find.text('默认横线'), findsOneWidget);
+    });
+
+    testWidgets('align 为 null 时默认 center', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(const TDivider(child: Text('默认居中'))),
+      );
+      expect(find.text('默认居中'), findsOneWidget);
+    });
+
+    testWidgets('dashed 为 null 时默认 false（实线）', (tester) async {
+      await tester.pumpWidget(wrapWithTheme(const TDivider()));
+      expect(find.byType(TDivider), findsOneWidget);
+    });
+  });
+
+  // 补充覆盖：dashed + align 组合、indent/endIndent 实际渲染
+  group('TDivider 补充覆盖', () {
+    testWidgets('dashed + child + align left 渲染短虚线', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          const TDivider(
+            dashed: true,
+            align: TDividerAlign.left,
+            child: Text('左虚线'),
+          ),
+        ),
+      );
+      expect(find.byType(CustomPaint), findsWidgets);
+      expect(find.text('左虚线'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(TDivider),
+          matching: find.byWidgetPredicate(
+            (widget) => widget is SizedBox && widget.width == 30,
+          ),
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('dashed + child + align right 渲染短虚线', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          const TDivider(
+            dashed: true,
+            align: TDividerAlign.right,
+            child: Text('右虚线'),
+          ),
+        ),
+      );
+      expect(find.byType(CustomPaint), findsWidgets);
+      expect(find.text('右虚线'), findsOneWidget);
+    });
+
+    testWidgets('Theme.indent + endIndent 实际渲染 Padding', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          dividerTheme: const TDividerThemeData(indent: 16, endIndent: 24),
+          const TDivider(),
+        ),
+      );
+      // 纯横线 + indent/endIndent 会包裹 Padding
+      expect(find.byType(Padding), findsWidgets);
+    });
+
+    testWidgets('Theme.textStyle 应用到 child', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          dividerTheme: const TDividerThemeData(
+            textStyle: TextStyle(fontSize: 20, color: Colors.red),
+          ),
+          const TDivider(child: Text('样式文字')),
+        ),
+      );
+      expect(find.text('样式文字'), findsOneWidget);
+    });
+
+    testWidgets('Theme.thickness 应用到横线', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          dividerTheme: const TDividerThemeData(thickness: 3),
+          const TDivider(),
+        ),
+      );
+      expect(find.byType(TDivider), findsOneWidget);
+    });
+
+    testWidgets('竖线 + Theme.margin 应用', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          dividerTheme: const TDividerThemeData(margin: EdgeInsets.all(8)),
+          const TDivider(layout: TDividerLayout.vertical),
+        ),
+      );
+      expect(find.byType(Padding), findsWidgets);
+    });
+
+    test('DashedPainter.shouldRepaint 比较全部字段', () {
+      final p1 = DashedPainter(color: Colors.red);
+      final p2 = DashedPainter(color: Colors.red);
+      // 相同参数：四个 != 均被求值，返回 false
+      expect(p1.shouldRepaint(p2), isFalse);
+      final p3 = DashedPainter(
+        color: Colors.blue,
+        strokeWidth: 2,
+        gap: 3,
+        solidLength: 4,
+      );
+      expect(p1.shouldRepaint(p3), isTrue);
+    });
+  });
+}
+
+void dividerTypographyOwnershipTests() {
+  for (final m3 in [false, true]) {
+    testWidgets('divider defaults isolate ambient typography M3=$m3', (
+      tester,
+    ) async {
+      final widths = <double>[];
+      for (final hostile in [false, true]) {
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: ThemeData(
+              useMaterial3: m3,
+              textTheme: TextTheme(
+                bodyMedium: TextStyle(
+                  fontSize: hostile ? 80 : 14,
+                  letterSpacing: hostile ? 18 : 0,
+                  wordSpacing: hostile ? 9 : 0,
+                  shadows: hostile
+                      ? const [Shadow(color: Colors.pink, blurRadius: 3)]
+                      : null,
+                ),
+              ),
+              extensions: [TThemeData.defaultData()],
+            ),
+            home: const Scaffold(body: TDivider(child: Text('Divider label'))),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final style =
+            (tester
+                        .renderObject<RenderParagraph>(
+                          find.text('Divider label'),
+                        )
+                        .text
+                    as TextSpan)
+                .style!;
+        expect(style.fontSize, 12);
+        expect(style.letterSpacing, 0);
+        expect(style.wordSpacing, 0);
+        expect(style.shadows, anyOf(isNull, isEmpty));
+        widths.add(tester.getSize(find.text('Divider label')).width);
+      }
+      expect(widths.first, widths.last);
+    });
+    testWidgets(
+      'divider TD styles and explicit caller content survive M3=$m3',
+      (tester) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: ThemeData(
+              useMaterial3: m3,
+              textTheme: const TextTheme(
+                bodyMedium: TextStyle(fontSize: 31, color: Colors.green),
+              ),
+              extensions: [
+                TThemeData.defaultData(),
+                const TDividerThemeData(
+                  textStyle: TextStyle(
+                    fontSize: 18,
+                    color: Colors.blue,
+                    letterSpacing: 3,
+                    wordSpacing: 2,
+                    shadows: [Shadow(color: Colors.blue, blurRadius: 2)],
+                  ),
+                ),
+              ],
+            ),
+            home: Scaffold(
+              body: Column(
+                children: [
+                  const TDivider(child: Text('themed')),
+                  const TDivider(
+                    child: Text(
+                      'explicit',
+                      style: TextStyle(
+                        fontSize: 24,
+                        color: Colors.pink,
+                        letterSpacing: 5,
+                      ),
+                    ),
+                  ),
+                  TDivider(
+                    child: Builder(
+                      builder: (context) => Text(
+                        'custom',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        TextStyle style(String text) =>
+            (tester.renderObject<RenderParagraph>(find.text(text)).text
+                    as TextSpan)
+                .style!;
+        expect(style('themed').fontSize, 18);
+        expect(style('themed').color, Colors.blue);
+        expect(style('themed').letterSpacing, 3);
+        expect(style('themed').wordSpacing, 2);
+        expect(style('themed').shadows!.single.color, Colors.blue);
+        expect(style('explicit').fontSize, 24);
+        expect(style('explicit').color, Colors.pink);
+        expect(style('explicit').letterSpacing, 5);
+        expect(style('custom').fontSize, 31);
+        expect(style('custom').color, Colors.green);
+      },
+    );
+  }
+}

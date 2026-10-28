@@ -1,0 +1,265 @@
+import 'dart:ui' show lerpDouble;
+
+import 'package:flutter/material.dart';
+import 'package:meta/meta.dart';
+
+import '../../theme/t_token_double_lerp.dart';
+
+/// `TSearchBar` 的默认视觉配置。
+///
+/// {@category ComponentTheme}
+class TSearchBarThemeData extends ThemeExtension<TSearchBarThemeData> {
+  TokenValueLerp<EdgeInsetsGeometry>? get _contentPaddingTransition => null;
+
+  @internal
+  EdgeInsetsGeometry resolveContentPadding(EdgeInsetsGeometry fallback) =>
+      _contentPaddingTransition?.resolve(fallback) ??
+      contentPadding ??
+      fallback;
+
+  TokenValueLerp<double>? get _clearIconSizeTransition => null;
+
+  @internal
+  double resolveClearIconSize(double fallback) =>
+      _clearIconSizeTransition?.resolve(fallback) ??
+      clearIconTheme?.size ??
+      fallback;
+  TokenValueLerp<double>? get _searchIconSizeTransition => null;
+
+  @internal
+  double resolveSearchIconSize(double fallback) =>
+      _searchIconSizeTransition?.resolve(fallback) ??
+      searchIconTheme?.size ??
+      fallback;
+
+  TokenDoubleLerp? get _heightLerp => null;
+
+  @internal
+  bool get hasHeightOverride => height != null || _heightLerp != null;
+
+  @internal
+  double resolveHeight(double fallback) =>
+      _heightLerp?.resolve(fallback) ?? height ?? fallback;
+
+  const TSearchBarThemeData({
+    this.height,
+    this.inputBackgroundColor,
+    this.contentPadding,
+    this.textStyle,
+    this.hintStyle,
+    this.searchIconTheme,
+    this.clearIconTheme,
+    this.actionTextStyle,
+    this.actionGap,
+    this.cursorHeight,
+  });
+
+  /// 搜索框高度；默认最小高度读取 size12（40dp）。
+  /// 显式高度保持固定；默认随内置文字和图标的自然尺寸增长。
+  final double? height;
+
+  /// 输入区域背景色，默认 `bgColorSecondaryContainer` Token。
+  final Color? inputBackgroundColor;
+
+  /// 输入区域内部留白，默认水平方向 12dp。
+  final EdgeInsetsGeometry? contentPadding;
+
+  /// 输入文字样式，未设置字段继承 `fontBodyLarge` Token。
+  final TextStyle? textStyle;
+
+  /// 占位文字样式，未设置字段继承 `fontBodyLarge` 和占位色 Token。
+  final TextStyle? hintStyle;
+
+  /// 搜索图标主题。
+  final IconThemeData? searchIconTheme;
+
+  /// 清除图标主题。
+  final IconThemeData? clearIconTheme;
+
+  /// 右侧操作文字样式。
+  final TextStyle? actionTextStyle;
+
+  /// 搜索框与右侧操作文字的间距，默认 15dp。
+  final double? actionGap;
+
+  /// 光标高度。
+  final double? cursorHeight;
+
+  /// 复制主题配置。
+  ///
+  /// ## 返回值
+  /// 返回主题副本；非空参数替换对应配置，null 参数保留当前配置。
+  @override
+  TSearchBarThemeData copyWith({
+    double? height,
+    Color? inputBackgroundColor,
+    EdgeInsetsGeometry? contentPadding,
+    TextStyle? textStyle,
+    TextStyle? hintStyle,
+    IconThemeData? searchIconTheme,
+    IconThemeData? clearIconTheme,
+    TextStyle? actionTextStyle,
+    double? actionGap,
+    double? cursorHeight,
+  }) {
+    return _InterpolatedTSearchBarThemeData(
+      TSearchBarThemeData(
+        height: height ?? this.height,
+        inputBackgroundColor: inputBackgroundColor ?? this.inputBackgroundColor,
+        contentPadding: contentPadding ?? this.contentPadding,
+        textStyle: textStyle ?? this.textStyle,
+        hintStyle: hintStyle ?? this.hintStyle,
+        searchIconTheme: searchIconTheme ?? this.searchIconTheme,
+        clearIconTheme: clearIconTheme ?? this.clearIconTheme,
+        actionTextStyle: actionTextStyle ?? this.actionTextStyle,
+        actionGap: actionGap ?? this.actionGap,
+        cursorHeight: cursorHeight ?? this.cursorHeight,
+      ),
+      heightLerp: height == null ? _heightLerp : null,
+      contentPaddingTransition: contentPadding == null
+          ? _contentPaddingTransition
+          : null,
+      clearIconSizeTransition: clearIconTheme == null
+          ? _clearIconSizeTransition
+          : null,
+      searchIconSizeTransition: searchIconTheme == null
+          ? _searchIconSizeTransition
+          : null,
+    );
+  }
+
+  /// 生成主题过渡配置。
+  ///
+  /// ## 返回值
+  /// 按 t 在当前主题和目标主题之间生成过渡主题。
+  /// other 为空或类型不匹配时返回当前主题；字段各自采用其类型的插值规则。
+  @override
+  TSearchBarThemeData lerp(
+    /// 目标主题；为空或类型不匹配时保留当前主题。
+    ThemeExtension<TSearchBarThemeData>? other,
+
+    /// 插值进度；通常 0 表示当前主题，1 表示目标主题。
+    double t,
+  ) {
+    if (other is! TSearchBarThemeData) {
+      return this;
+    }
+    return _InterpolatedTSearchBarThemeData(
+      TSearchBarThemeData(
+        height: lerpDouble(height, other.height, t),
+        inputBackgroundColor: Color.lerp(
+          inputBackgroundColor,
+          other.inputBackgroundColor,
+          t,
+        ),
+        contentPadding: EdgeInsetsGeometry.lerp(
+          contentPadding,
+          other.contentPadding,
+          t,
+        ),
+        textStyle: TextStyle.lerp(textStyle, other.textStyle, t),
+        hintStyle: TextStyle.lerp(hintStyle, other.hintStyle, t),
+        searchIconTheme: IconThemeData.lerp(
+          searchIconTheme,
+          other.searchIconTheme,
+          t,
+        ),
+        clearIconTheme: IconThemeData.lerp(
+          clearIconTheme,
+          other.clearIconTheme,
+          t,
+        ),
+        actionTextStyle: TextStyle.lerp(
+          actionTextStyle,
+          other.actionTextStyle,
+          t,
+        ),
+        actionGap: lerpDouble(actionGap, other.actionGap, t),
+        cursorHeight: lerpDouble(cursorHeight, other.cursorHeight, t),
+      ),
+      heightLerp: TokenDoubleLerp.between(
+        height,
+        _heightLerp,
+        other.height,
+        other._heightLerp,
+        t,
+      ),
+      contentPaddingTransition: TokenValueLerp.between(
+        contentPadding,
+        _contentPaddingTransition,
+        other.contentPadding,
+        other._contentPaddingTransition,
+        t,
+        (a, b, t) => EdgeInsetsGeometry.lerp(a, b, t)!,
+      ),
+      clearIconSizeTransition: TokenValueLerp.between(
+        clearIconTheme?.size,
+        _clearIconSizeTransition,
+        other.clearIconTheme?.size,
+        other._clearIconSizeTransition,
+        t,
+        (a, b, t) => lerpDouble(a, b, t)!,
+      ),
+      searchIconSizeTransition: TokenValueLerp.between(
+        searchIconTheme?.size,
+        _searchIconSizeTransition,
+        other.searchIconTheme?.size,
+        other._searchIconSizeTransition,
+        t,
+        (a, b, t) => lerpDouble(a, b, t)!,
+      ),
+    );
+  }
+}
+
+/// 搜索框形态。
+enum TSearchBarVariant {
+  /// 方形搜索框。
+  square,
+
+  /// 圆角搜索框。
+  round,
+}
+
+/// 搜索框文本对齐方式。
+enum TSearchBarAlignment {
+  /// 左对齐。
+  left,
+
+  /// 居中对齐。
+  center,
+}
+
+class _InterpolatedTSearchBarThemeData extends TSearchBarThemeData {
+  _InterpolatedTSearchBarThemeData(
+    TSearchBarThemeData data, {
+    TokenDoubleLerp? heightLerp,
+    TokenValueLerp<EdgeInsetsGeometry>? contentPaddingTransition,
+    TokenValueLerp<double>? clearIconSizeTransition,
+    TokenValueLerp<double>? searchIconSizeTransition,
+  }) : _contentPaddingTransition = contentPaddingTransition,
+       _clearIconSizeTransition = clearIconSizeTransition,
+       _searchIconSizeTransition = searchIconSizeTransition,
+       _heightLerp = heightLerp,
+       super(
+         height: data.height,
+         inputBackgroundColor: data.inputBackgroundColor,
+         contentPadding: data.contentPadding,
+         textStyle: data.textStyle,
+         hintStyle: data.hintStyle,
+         searchIconTheme: data.searchIconTheme,
+         clearIconTheme: data.clearIconTheme,
+         actionTextStyle: data.actionTextStyle,
+         actionGap: data.actionGap,
+         cursorHeight: data.cursorHeight,
+       );
+
+  @override
+  final TokenValueLerp<EdgeInsetsGeometry>? _contentPaddingTransition;
+  @override
+  final TokenValueLerp<double>? _clearIconSizeTransition;
+  @override
+  final TokenValueLerp<double>? _searchIconSizeTransition;
+  @override
+  final TokenDoubleLerp? _heightLerp;
+}

@@ -1,0 +1,40 @@
+// ignore_for_file: prefer_const_constructors
+
+import 'package:flutter/material.dart';
+
+import '../badge/t_badge.dart';
+
+/// 侧边导航栏的不可变配置项。
+///
+/// 这是数据配置而非 Widget，不参与 Flutter Key 匹配。
+/// [value] 应在同一个侧边导航栏的 children 列表中保持唯一，以便组件稳定地
+/// 保留选中状态和滚动目标。
+class TSideBarItem {
+  const TSideBarItem({
+    this.badge,
+    this.disabled = false,
+    this.icon,
+    this.label = '',
+    this.value = -1,
+  });
+
+  /// 展示在标签文字右上角的徽标；为空时不显示。
+  ///
+  /// SideBar 会将标签文字作为徽标锚点，并使用 [TBadgeConfig] 描述徽标内容、
+  /// 形态和可选位置覆盖。调用方已经拥有目标 Widget 时，应直接使用 [TBadge]
+  /// 包装该 Widget。
+  final TBadgeConfig? badge;
+
+  /// 是否禁用
+  final bool disabled;
+
+  /// 图标
+  final IconData? icon;
+
+  /// 标签
+  final String label;
+
+  /// 条目的业务值；由调用方指定，默认 -1，不自动使用 children 中的位置。
+  /// 父组件通过相同的值指定选中项；选择回调返回该值。
+  final int value;
+}

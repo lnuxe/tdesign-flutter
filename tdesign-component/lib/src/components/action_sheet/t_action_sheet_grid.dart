@@ -1,0 +1,474 @@
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+
+import '../../theme/t_colors.dart';
+import '../../theme/t_fonts.dart';
+import '../../theme/t_internal_material.dart';
+import '../../theme/t_radius.dart';
+import '../../theme/t_spacers.dart';
+import '../../theme/t_theme.dart';
+import '../text/t_text.dart';
+import '../text/t_text_styled.dart';
+import 't_action_sheet_item.dart';
+import 't_action_sheet_item_widget.dart';
+import 't_action_sheet_types.dart';
+
+/// 宫格类型动作面板
+///
+/// 以宫格布局展示可选项，支持分页和横向滚动。
+/// 通常不直接使用，由 `TActionSheet.showGrid` 创建。
+class TActionSheetGrid<T> extends StatefulWidget {
+  static const paginationIndicatorSize = 8.0;
+  static const paginationIndicatorExtent = 24.0;
+
+  /// 动作面板的项目列表
+  final List<TActionSheetItem<T>> items;
+
+  /// 描述文本
+  final String? subtitle;
+
+  /// 普通、分页或横向滚动宫格布局
+  final TActionSheetGridLayout layout;
+
+  /// 取消按钮的文本
+  final String? cancelText;
+
+  /// 是否显示取消按钮
+  final bool showCancel;
+
+  /// 取消按钮的回调函数
+  final VoidCallback? onCancel;
+
+  /// 选择项目时的回调函数
+  final TActionSheetOnSelected<T>? onSelected;
+
+  final bool _adaptiveItemHeight;
+
+  /// 项目的行高；显式值固定，默认至少 96 并随内置文字增长。
+  final double itemHeight;
+
+  /// 是否使用安全区域
+  final bool useSafeArea;
+
+  const TActionSheetGrid({
+    super.key,
+    required this.items,
+    this.subtitle,
+    this.layout = const TActionSheetGridLayout.fixed(),
+    this.cancelText,
+    this.showCancel = true,
+    this.onCancel,
+    this.onSelected,
+    double? itemHeight,
+    this.useSafeArea = true,
+  }) : itemHeight = itemHeight ?? 96,
+       _adaptiveItemHeight = itemHeight == null;
+
+  static double preferredPopupHeight(
+    BuildContext context, {
+    required String? subtitle,
+    required TActionSheetGridLayout layout,
+    required double itemHeight,
+    required bool showCancel,
+    String? cancelText,
+  }) {
+    final token = context.tTheme;
+    final showPagination = layout.mode == TActionSheetGridMode.paged;
+    var height = token.spacer + layout.rows * itemHeight;
+    if (subtitle?.isNotEmpty ?? false) {
+      final measured =
+          TTextStyled(
+            subtitle!,
+            font: token.fontBodyMedium,
+            style: TextStyle(color: token.textColorPlaceholder),
+          ).naturalSize(
+            context,
+            maxWidth: math.max(
+              0,
+              MediaQuery.sizeOf(context).width - token.spacer2 * 2,
+            ),
+          );
+      height += 4.0 + measured.height + token.spacer1;
+    }
+    if (showPagination) {
+      height += paginationIndicatorExtent;
+    }
+    if (showCancel) {
+      height +=
+          (showPagination ? token.spacer2 : token.spacer) +
+          actionSheetCancelHeight(context, cancelText);
+    }
+    return height;
+  }
+
+  @override
+  State<TActionSheetGrid<T>> createState() => _TActionSheetGridState<T>();
+}
+
+class _TActionSheetGridState<T> extends State<TActionSheetGrid<T>> {
+  int currentPage = 0;
+  double get _itemHeight => widget._adaptiveItemHeight
+      ? actionSheetGridItemHeight(context, widget.items)
+      : widget.itemHeight;
+
+  @override
+  Widget build(BuildContext context) {
+    final borderRadius = Radius.circular(context.tTheme.radiusExtraLarge);
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.only(
+          topLeft: borderRadius,
+          topRight: borderRadius,
+        ),
+        color: context.tTheme.bgColorContainer,
+      ),
+      clipBehavior: Clip.antiAlias,
+      padding: widget.useSafeArea
+          ? EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom)
+          : EdgeInsets.zero,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(height: context.tTheme.spacer),
+          if (widget.subtitle?.isNotEmpty ?? false) _buildDescription(context),
+          Flexible(fit: FlexFit.loose, child: _buildGridContent(context)),
+          if (widget.showCancel)
+            buildCancelButton(
+              context,
+              widget.layout.mode == TActionSheetGridMode.paged,
+              widget.cancelText,
+              widget.onCancel,
+              spacingColor: context.tTheme.bgColorContainer,
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGridContent(BuildContext context) {
+    return switch (widget.layout.mode) {
+      TActionSheetGridMode.fixed => _buildGrid(context),
+      TActionSheetGridMode.scroll => _buildScrollGrid(context),
+      TActionSheetGridMode.paged => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(fit: FlexFit.loose, child: _buildPaginationGrid(context)),
+          _buildPaginationDots(context),
+        ],
+      ),
+    };
+  }
+
+  Widget _buildDescription(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: context.tTheme.spacer2,
+        right: context.tTheme.spacer2,
+        top: 4.0,
+        bottom: context.tTheme.spacer1,
+      ),
+      child: Center(
+        child: TText(
+          widget.subtitle!,
+          font: context.tTheme.fontBodyMedium,
+          textAlign: TextAlign.center,
+          style: TextStyle(color: context.tTheme.textColorPlaceholder),
+        ),
+      ),
+    );
+  }
+
+  Widget _gridWrap(Widget child) {
+    return SizedBox(height: widget.layout.rows * _itemHeight, child: child);
+  }
+
+  Widget _buildPaginationGrid(BuildContext context) {
+    return _gridWrap(
+      TInternalScrollScope(
+        child: PageView.builder(
+          itemCount: (widget.items.length / widget.layout.count).ceil(),
+          // 当页面改变时更新当前页码
+          onPageChanged: (index) {
+            setState(() {
+              currentPage = index;
+            });
+          },
+          itemBuilder: (context, pageIndex) {
+            // 获取当前页面的项目
+            final pageItems = widget.items
+                .skip(pageIndex * widget.layout.count)
+                .take(widget.layout.count)
+                .toList();
+            return _buildGrid(context, items: pageItems);
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildScrollGrid(BuildContext context) {
+    if (widget.items.isEmpty) {
+      return _gridWrap(const SizedBox.shrink());
+    }
+    final columnsPerPanel = widget.layout.count ~/ widget.layout.rows;
+    final panelCount = (widget.items.length / widget.layout.count).ceil();
+    return _gridWrap(
+      LayoutBuilder(
+        builder: (context, constraints) {
+          final availableWidth = constraints.maxWidth.isFinite
+              ? constraints.maxWidth
+              : MediaQuery.sizeOf(context).width;
+          final fittedItemWidth = availableWidth / columnsPerPanel;
+          final itemWidth = math.max(
+            fittedItemWidth,
+            widget.layout.itemMinWidth ?? 0,
+          );
+          final panelWidth = itemWidth * columnsPerPanel;
+          return TInternalScrollScope(
+            child: ListView.builder(
+              itemCount: panelCount,
+              padding: EdgeInsets.zero,
+              scrollDirection: Axis.horizontal,
+              itemBuilder: (context, panel) {
+                return SizedBox(
+                  width: panelWidth,
+                  child: Column(
+                    children: List.generate(widget.layout.rows, (row) {
+                      return Row(
+                        children: List.generate(columnsPerPanel, (column) {
+                          final index =
+                              panel * widget.layout.count +
+                              row * columnsPerPanel +
+                              column;
+                          return SizedBox(
+                            width: itemWidth,
+                            height: _itemHeight,
+                            child: index < widget.items.length
+                                ? TActionSheetItemWidget<T>(
+                                    item: widget.items[index],
+                                    onSelected: widget.onSelected,
+                                  )
+                                : const SizedBox.shrink(),
+                          );
+                        }),
+                      );
+                    }),
+                  ),
+                );
+              },
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildGrid(BuildContext context, {List<TActionSheetItem<T>>? items}) {
+    // 计算每行的项目数
+    final itemsPerRow = widget.layout.count ~/ widget.layout.rows;
+    return _gridWrap(
+      LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.maxWidth.isFinite
+              ? constraints.maxWidth
+              : MediaQuery.sizeOf(context).width;
+          final childAspectRatio = width / itemsPerRow / _itemHeight;
+          final needsVerticalScroll =
+              (items ?? widget.items).length > widget.layout.count ||
+              constraints.maxHeight < widget.layout.rows * _itemHeight;
+          return TInternalScrollScope(
+            child: GridView.builder(
+              physics: needsVerticalScroll
+                  ? const AlwaysScrollableScrollPhysics()
+                  : const NeverScrollableScrollPhysics(),
+              padding: EdgeInsets.zero,
+              itemCount: (items ?? widget.items).length,
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: itemsPerRow,
+                childAspectRatio: childAspectRatio,
+              ),
+              itemBuilder: (context, index) {
+                final item = (items ?? widget.items)[index];
+                return TActionSheetItemWidget<T>(
+                  item: item,
+                  onSelected: widget.onSelected,
+                );
+              },
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildPaginationDots(BuildContext context) {
+    return SizedBox(
+      height: TActionSheetGrid.paginationIndicatorExtent,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: List.generate(
+          (widget.items.length / widget.layout.count).ceil(),
+          (index) {
+            return Container(
+              margin: const EdgeInsets.symmetric(horizontal: 4.0),
+              width: TActionSheetGrid.paginationIndicatorSize,
+              height: TActionSheetGrid.paginationIndicatorSize,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: currentPage == index
+                    ? context.tTheme.brandColor
+                    : context.tTheme.textColorDisabled,
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+/// 带标题分组的横向滚动宫格动作面板。
+///
+/// 通常不直接使用，由 `TActionSheet.showGridSections` 创建。
+class TActionSheetSectionGrid<T> extends StatelessWidget {
+  const TActionSheetSectionGrid({
+    super.key,
+    required this.sections,
+    required this.cancelText,
+    required this.itemWidth,
+    required this.itemHeight,
+    this.showCancel = true,
+    this.onCancel,
+    this.onSelected,
+    this.useSafeArea = true,
+  });
+
+  /// 带标题的宫格分组。
+  final List<TActionSheetGridSection<T>> sections;
+
+  /// 取消按钮文本。
+  final String cancelText;
+
+  /// 横向滚动项目宽度。
+  final double itemWidth;
+
+  /// 横向滚动项目高度。
+  final double itemHeight;
+
+  /// 是否显示取消按钮。
+  final bool showCancel;
+
+  /// 点击取消按钮时触发。
+  final VoidCallback? onCancel;
+
+  /// 点击项目时触发。
+  final TActionSheetOnSelected<T>? onSelected;
+
+  /// 是否避让底部安全区。
+  final bool useSafeArea;
+
+  /// 根据当前字体与布局参数计算弹层首选高度。
+  static double preferredPopupHeight(
+    BuildContext context, {
+    required int sectionCount,
+    Iterable<String>? titles,
+    required double itemHeight,
+    required bool showCancel,
+    String? cancelText,
+  }) {
+    final token = context.tTheme;
+    final titleValues = titles ?? List.filled(sectionCount, 'Ag');
+    final sectionsHeight = titleValues.fold<double>(
+      0,
+      (sum, title) =>
+          sum +
+          token.spacer1 * 2 +
+          itemHeight +
+          TTextStyled(
+                title,
+                font: token.fontBodyMedium,
+                style: TextStyle(color: token.textColorPlaceholder),
+              )
+              .naturalSize(
+                context,
+                maxWidth: math.max(
+                  0,
+                  MediaQuery.sizeOf(context).width - token.spacer2 * 2,
+                ),
+              )
+              .height,
+    );
+    return sectionsHeight +
+        (showCancel ? token.spacer + actionSheetCancelButtonHeight : 0);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final borderRadius = Radius.circular(context.tTheme.radiusExtraLarge);
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.only(
+          topLeft: borderRadius,
+          topRight: borderRadius,
+        ),
+        color: context.tTheme.bgColorContainer,
+      ),
+      clipBehavior: Clip.antiAlias,
+      padding: useSafeArea
+          ? EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom)
+          : EdgeInsets.zero,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final section in sections) ...[
+            _buildSectionTitle(context, section.title),
+            SizedBox(
+              height: itemHeight,
+              child: TInternalScrollScope(
+                child: ListView.builder(
+                  padding: EdgeInsets.zero,
+                  scrollDirection: Axis.horizontal,
+                  itemCount: section.items.length,
+                  itemBuilder: (context, index) => SizedBox(
+                    width: itemWidth,
+                    height: itemHeight,
+                    child: TActionSheetItemWidget<T>(
+                      item: section.items[index],
+                      onSelected: onSelected,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+          if (showCancel)
+            buildCancelButton(
+              context,
+              false,
+              cancelText,
+              onCancel,
+              spacingColor: context.tTheme.bgColorContainer,
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSectionTitle(BuildContext context, String title) {
+    return SizedBox(
+      width: double.infinity,
+      child: Padding(
+        padding: EdgeInsets.symmetric(
+          horizontal: context.tTheme.spacer2,
+          vertical: context.tTheme.spacer1,
+        ),
+        child: TText(
+          title,
+          font: context.tTheme.fontBodyMedium,
+          style: TextStyle(color: context.tTheme.textColorPlaceholder),
+        ),
+      ),
+    );
+  }
+}

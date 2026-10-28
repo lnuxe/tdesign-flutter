@@ -1,0 +1,205 @@
+import 'package:flutter/material.dart';
+
+import '../../theme/t_colors.dart';
+import '../../theme/t_fonts.dart';
+import '../../theme/t_internal_material.dart';
+import '../../theme/t_radius.dart';
+import '../../theme/t_sizes.dart';
+import '../../theme/t_theme.dart';
+import '../badge/t_badge.dart';
+import '../badge/t_badge_internal.dart';
+import '../text/t_text_styled.dart';
+import 't_sidebar_theme_data.dart';
+
+/// 侧边栏单项的内部渲染组件。
+///
+/// 通常由侧边导航栏创建；直接使用时需要调用方同步提供选中和相邻项状态。
+class TWrapSideBarItem extends StatelessWidget {
+  const TWrapSideBarItem({
+    Key? key,
+    this.badge,
+    required this.disabled,
+    this.icon,
+    this.label = '',
+    this.contentPadding,
+    this.textStyle,
+    this.selectedTextStyle,
+    this.value = -1,
+    this.selected = false,
+    this.topAdjacent = false,
+    this.bottomAdjacent = false,
+    this.onTap,
+    this.selectedBgColor,
+    this.unSelectedBgColor,
+    required this.variant,
+  }) : super(key: key);
+
+  final TBadgeConfig? badge;
+  final bool disabled;
+  final IconData? icon;
+  final String label;
+  final EdgeInsetsGeometry? contentPadding;
+  final TextStyle? textStyle;
+  final TextStyle? selectedTextStyle;
+  final int value;
+  final bool selected;
+  final Color? selectedBgColor;
+  final Color? unSelectedBgColor;
+  final bool topAdjacent;
+  final bool bottomAdjacent;
+  final VoidCallback? onTap;
+  final TSideBarVariant variant;
+
+  static const preLineWidth = 3.0;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      selected: selected,
+      enabled: !disabled && onTap != null,
+      label: label,
+      excludeSemantics: true,
+      child: GestureDetector(
+        onTap: disabled ? null : onTap,
+        child: variant == TSideBarVariant.line
+            ? renderNormalItem(context)
+            : renderTagItem(context),
+      ),
+    );
+  }
+
+  Widget renderNormalItem(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: selectedBgColor ?? context.tTheme.bgColorContainer,
+      ),
+      child: Container(
+        decoration: BoxDecoration(
+          color: selected
+              ? selectedBgColor ?? context.tTheme.bgColorContainer
+              : unSelectedBgColor ??
+                    context
+                        .tTheme
+                        .bgColorSecondaryContainer, // coverage:ignore-line
+          borderRadius: BorderRadius.only(
+            topRight: Radius.circular(topAdjacent ? 9 : 0),
+            bottomRight: Radius.circular(bottomAdjacent ? 9 : 0),
+          ),
+        ),
+        child: Row(
+          children: [
+            renderPreLine(context),
+            Expanded(
+              child: Padding(
+                padding: contentPadding ?? EdgeInsets.all(context.tTheme.size6),
+                child: renderMainContent(context),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget renderTagItem(BuildContext context) {
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 56),
+      child: Container(
+        decoration: BoxDecoration(
+          color: unSelectedBgColor ?? context.tTheme.bgColorSecondaryContainer,
+        ),
+        padding: EdgeInsets.all(context.tTheme.size4),
+        child: Container(
+          decoration: BoxDecoration(
+            color: selected && !disabled
+                ? selectedBgColor ?? context.tTheme.bgColorContainer
+                : null,
+            // The supplied design's 6px radius-medium uses Flutter's default tier.
+            borderRadius: BorderRadius.circular(context.tTheme.radiusDefault),
+          ),
+          padding: contentPadding ?? EdgeInsets.all(context.tTheme.size4),
+          child: renderMainContent(context),
+        ),
+      ),
+    );
+  }
+
+  Widget renderMainContent(BuildContext context) {
+    final label = renderLabel(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        renderIcon(context),
+        Expanded(
+          child: badge == null
+              ? label
+              : Padding(
+                  padding: const EdgeInsetsDirectional.only(end: 12),
+                  child: Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: TBadgeFromConfig(config: badge!, child: label),
+                  ),
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget renderPreLine(BuildContext context) {
+    return Visibility(
+      visible: !disabled && selected,
+      replacement: const SizedBox(width: preLineWidth),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: preLineWidth,
+            height: 14,
+            decoration: BoxDecoration(
+              color: _foregroundColor(context),
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget renderIcon(BuildContext context) {
+    return Visibility(
+      visible: icon != null,
+      child: Padding(
+        padding: const EdgeInsets.only(right: 2),
+        child: TInternalIcon(icon, size: 20, color: _foregroundColor(context)),
+      ),
+    );
+  }
+
+  Color _foregroundColor(BuildContext context) {
+    if (disabled) {
+      return context.tTheme.textColorDisabled;
+    }
+    if (selected) {
+      return selectedTextStyle?.color ?? context.tTheme.brandColor;
+    }
+    return textStyle?.color ?? context.tTheme.textColorPrimary;
+  }
+
+  Widget renderLabel(BuildContext context) {
+    final effectiveStyle = selected
+        ? textStyle?.merge(selectedTextStyle) ?? selectedTextStyle
+        : textStyle;
+    return TTextStyled(
+      label,
+      font: context.tTheme.fontBodyLarge,
+      // 状态前景色与图标、指示线保持一致；未选中样式只为选中态提供排版回退。
+      style: (effectiveStyle ?? const TextStyle()).copyWith(
+        color: _foregroundColor(context),
+      ),
+      fontWeight: selected && !disabled ? FontWeight.w600 : FontWeight.w400,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    );
+  }
+}

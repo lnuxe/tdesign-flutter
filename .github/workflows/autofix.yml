@@ -1,0 +1,43 @@
+name: autofix.ci
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'tdesign-component/**'
+      - 'README*.md'
+      - 'tdesign-site/site/docs/**'
+      - 'scripts/documentation.mjs'
+      - 'scripts/sync-readme.mjs'
+      - '.github/workflows/autofix.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  autofix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: 3.32.0
+          cache: true
+
+      - name: Generate API documents
+        working-directory: ./tdesign-component
+        run: sh ./demo_tool/all_build.sh
+
+      - name: Generate example code snippets
+        working-directory: ./tdesign-component
+        run: dart run tool/generate_example_code.dart --verbose
+
+      - name: Sync README files
+        run: node scripts/sync-readme.mjs
+
+      - uses: autofix-ci/action@v1

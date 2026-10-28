@@ -1,0 +1,101 @@
+import 'package:flutter/material.dart';
+
+import '../../theme/t_colors.dart';
+import '../../theme/t_internal_material.dart';
+import '../../theme/t_theme.dart';
+import '../icon/t_icon.dart';
+import '../text/t_text_resolve.dart';
+import '../text/t_text_style_scope.dart';
+import '../text/t_text_styled.dart';
+import 't_tab_bar_theme_data.dart';
+
+/// Tab 组件
+///
+/// TDesign 选项卡标签，通常作为 `TTabsBar.tabs` 的子项使用。
+class TTab extends Tab {
+  /// 文字内容；与 child 互斥，text、child、icon 至少提供一个。
+  @override
+  final String? text;
+
+  /// 自定义标签内容；与 text 互斥，可与 icon 同时提供。
+  @override
+  final Widget? child;
+
+  /// 图标
+  @override
+  final Widget? icon;
+
+  /// 是否可用，默认 true。
+  ///
+  /// 设为 `false` 时使用禁用样式，并由 `TTabsBar` 阻止该项被选择。
+  /// Material [TabBar] 不识别此扩展字段；直接将 [TTab] 用作 Material
+  /// [TabBar.tabs] 时只会呈现禁用样式，不会阻止其切换。
+  final bool enabled;
+
+  const TTab({Key? key, this.text, this.child, this.icon, this.enabled = true})
+    : assert(
+        text == null || child == null,
+        'text and child cannot be provided together.',
+      ),
+      assert(
+        text != null || child != null || icon != null,
+        'Provide text, child, or icon.',
+      ),
+      super(key: key, text: text, child: child, icon: icon);
+
+  @override
+  Size get preferredSize => const Size.fromHeight(46);
+
+  @override
+  Widget build(BuildContext context) {
+    var label = text != null || child != null ? _buildLabelContent() : null;
+    if (icon != null) {
+      label = label == null
+          ? icon!
+          : Row(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: <Widget>[icon!, const SizedBox(width: 4), label],
+            );
+    }
+    Widget content = Center(
+      widthFactor: 1.0,
+      heightFactor: child == null ? 1.0 : null,
+      child: label,
+    );
+    if (!enabled) {
+      final disabledStyle = TTextResolve.resolve(
+        context: context,
+        style: TextStyle(color: context.tTheme.textColorDisabled).merge(
+          Theme.of(context).extension<TTabsBarThemeData>()?.disabledLabelStyle,
+        ),
+      );
+      content = TTextStyleScope(
+        style: TTextResolve.resolve(context: context, style: disabledStyle),
+        child: TInternalIconTheme.merge(
+          data: IconThemeData(color: disabledStyle.color),
+          child: TIconStyleScope(
+            color: disabledStyle.color,
+            size: TIconStyleScope.maybeOf(context)?.size,
+            child: content,
+          ),
+        ),
+      );
+    }
+    return content;
+  }
+
+  Widget _buildLabelContent() {
+    if (child != null) {
+      return child!;
+    }
+    return TTextStyled(
+      text!,
+      centerLeading: true,
+      style: null,
+      softWrap: false,
+      overflow: TextOverflow.fade,
+    );
+  }
+}

@@ -1,0 +1,1056 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:tdesign_flutter/src/components/loading/t_activity_indicator.dart';
+import 'package:tdesign_flutter/src/components/loading/t_circle_indicator.dart';
+import 'package:tdesign_flutter/src/components/loading/t_point_indicator.dart';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
+
+/// TLoading Widget 测试
+///
+/// Tier1 组件：覆盖 Theme 子树 mergeExtension(TLoadingThemeData)。
+/// 覆盖自定义 size、icon 三种、text、axis 方向。
+void main() {
+  for (final painted in [false, true]) {
+    for (final obscured in [false, true]) {
+      testWidgets(
+        'Loading entries automatically dispose painted=$painted obscured=$obscured',
+        (tester) async {
+          // Teardown isolates failures; disposal assertions precede any cleanup command.
+          addTearDown(TLoadingController.dismiss);
+          late BuildContext anchor;
+          await tester.pumpWidget(
+            MaterialApp(
+              home: Builder(
+                builder: (context) {
+                  anchor = context;
+                  return const SizedBox();
+                },
+              ),
+            ),
+          );
+          final entries = <OverlayEntry>[];
+          final disposals = Map<OverlayEntry, int>.identity();
+          var capture = true;
+          void record(ObjectEvent event) {
+            final object = event.object;
+            if (object is! OverlayEntry) {
+              return;
+            }
+            if (event is ObjectCreated && capture) {
+              entries.add(object);
+            } else if (event is ObjectDisposed && entries.contains(object)) {
+              disposals.update(object, (count) => count + 1, ifAbsent: () => 1);
+            }
+          }
+
+          FlutterMemoryAllocations.instance.addListener(record);
+          addTearDown(
+            () => FlutterMemoryAllocations.instance.removeListener(record),
+          );
+          TLoadingController.show(anchor, child: const Text('owned loading'));
+          capture = false;
+          expect(entries, isNotEmpty);
+          if (painted) {
+            await tester.pump();
+          }
+          OverlayEntry? cover;
+          if (obscured) {
+            cover = OverlayEntry(
+              opaque: true,
+              builder: (_) => const ColoredBox(color: Colors.white),
+            );
+            Overlay.of(anchor).insert(cover);
+            await tester.pump();
+            expect(find.text('owned loading'), findsNothing);
+          }
+          await tester.pumpWidget(const SizedBox());
+          await tester.pump();
+          // Observe disposal directly, before any subsequent show/dismiss can mask a leak.
+          for (final entry in entries) {
+            expect(
+              disposals[entry],
+              1,
+              reason:
+                  'Every owned Entry must be disposed exactly once without another command.',
+            );
+          }
+          await tester.pump();
+          for (final entry in entries) {
+            expect(disposals[entry], 1);
+          }
+          cover?.remove();
+          cover?.dispose();
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+  }
+
+  testWidgets('Loading observer does not retain obscured content State', (
+    tester,
+  ) async {
+    // Teardown isolates failures; disposal assertions precede any cleanup command.
+    addTearDown(TLoadingController.dismiss);
+    late BuildContext anchor;
+    var mounts = 0;
+    var disposals = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) {
+            anchor = context;
+            return const SizedBox();
+          },
+        ),
+      ),
+    );
+    TLoadingController.show(
+      anchor,
+      child: _LoadingLifecycleProbe(
+        onMount: () => mounts++,
+        onDispose: () => disposals++,
+      ),
+    );
+    await tester.pump();
+    expect(mounts, 1);
+    final cover = OverlayEntry(
+      opaque: true,
+      builder: (_) => const ColoredBox(color: Colors.white),
+    );
+    Overlay.of(anchor).insert(cover);
+    await tester.pump();
+    expect(disposals, 1);
+    TLoadingController.show(anchor, child: const Text('ignored replacement'));
+    cover.remove();
+    cover.dispose();
+    await tester.pump();
+    expect(mounts, 2);
+    expect(find.text('loading lifecycle'), findsOneWidget);
+    expect(find.text('ignored replacement'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+    expect(disposals, 2);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Loading dead owner cleanup cannot clear a new session', (
+    tester,
+  ) async {
+    // Teardown isolates failures; disposal assertions precede any cleanup command.
+    addTearDown(TLoadingController.dismiss);
+    late BuildContext outer;
+    late BuildContext inner;
+    var showInner = true;
+    late StateSetter update;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) {
+            outer = context;
+            return StatefulBuilder(
+              builder: (context, setState) {
+                update = setState;
+                return showInner
+                    ? Overlay(
+                        initialEntries: [
+                          OverlayEntry(
+                            builder: (context) {
+                              inner = context;
+                              return const SizedBox();
+                            },
+                          ),
+                        ],
+                      )
+                    : const SizedBox();
+              },
+            );
+          },
+        ),
+      ),
+    );
+    TLoadingController.show(
+      inner,
+      child: _LoadingLifecycleProbe(
+        onMount: () {},
+        onDispose: () => scheduleMicrotask(() {
+          TLoadingController.show(
+            outer,
+            child: const Text('new owner loading'),
+          );
+        }),
+      ),
+    );
+    await tester.pump();
+    update(() => showInner = false);
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('new owner loading'), findsOneWidget);
+    TLoadingController.show(outer, child: const Text('must be ignored'));
+    await tester.pump();
+    expect(find.text('new owner loading'), findsOneWidget);
+    expect(find.text('must be ignored'), findsNothing);
+    TLoadingController.dismiss();
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('unpainted Loading session releases and can be reused', (
+    tester,
+  ) async {
+    late BuildContext anchor;
+    Widget host() => MaterialApp(
+      home: Builder(
+        builder: (context) {
+          anchor = context;
+          return const SizedBox();
+        },
+      ),
+    );
+    await tester.pumpWidget(host());
+    TLoadingController.show(anchor, child: const Text('pending loading'));
+    await tester.pumpWidget(const SizedBox());
+    TLoadingController.dismiss();
+    await tester.pumpWidget(host());
+    TLoadingController.show(anchor, child: const Text('new loading'));
+    await tester.pump();
+    expect(find.text('new loading'), findsOneWidget);
+    TLoadingController.dismiss();
+    await tester.pump();
+  });
+
+  Widget wrapWithTheme(Widget child, {TLoadingThemeData? loadingTheme}) {
+    var theme = TThemeBuilder.light(TThemeData.defaultData());
+    if (loadingTheme != null) {
+      theme = theme.mergeExtension(loadingTheme);
+    }
+    return MaterialApp(
+      theme: theme,
+      home: Scaffold(
+        backgroundColor: Colors.white,
+        body: Center(child: child),
+      ),
+    );
+  }
+
+  // ============================================================
+  // 基础渲染
+  // ============================================================
+  group('TLoading 基础渲染', () {
+    test('size 必须大于 0', () {
+      expect(() => TLoading(size: 0), throwsAssertionError);
+    });
+
+    testWidgets('默认 size 正常渲染', (tester) async {
+      await tester.pumpWidget(wrapWithTheme(const TLoading()));
+      expect(find.byType(TLoading), findsOneWidget);
+    });
+
+    testWidgets('自定义 size 正常渲染', (tester) async {
+      await tester.pumpWidget(wrapWithTheme(const TLoading(size: 28)));
+      expect(find.byType(TLoading), findsOneWidget);
+      final indicator = tester.widget<TCircleIndicator>(
+        find.byType(TCircleIndicator),
+      );
+      expect(indicator.size, 28);
+      expect(indicator.lineWidth, 3.5);
+      expect(indicator.duration, 800);
+    });
+
+    testWidgets('大尺寸正常渲染', (tester) async {
+      await tester.pumpWidget(wrapWithTheme(const TLoading(size: 32)));
+      expect(find.byType(TLoading), findsOneWidget);
+    });
+  });
+
+  // ============================================================
+  // icon 图标类型
+  // ============================================================
+  group('TLoading icon 类型', () {
+    testWidgets('circle 图标正常渲染', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(const TLoading(icon: TLoadingIcon.circle)),
+      );
+      expect(find.byType(TLoading), findsOneWidget);
+      expect(
+        tester.widget<TCircleIndicator>(find.byType(TCircleIndicator)).color,
+        TThemeData.defaultData().brandColor,
+      );
+    });
+
+    testWidgets('point 点状图标正常渲染', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(const TLoading(icon: TLoadingIcon.point)),
+      );
+      expect(find.byType(TLoading), findsOneWidget);
+      expect(
+        tester
+            .widget<TPointBounceIndicator>(find.byType(TPointBounceIndicator))
+            .color,
+        TThemeData.defaultData().brandColor,
+      );
+    });
+
+    testWidgets('activity 菊花状图标正常渲染', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(const TLoading(icon: TLoadingIcon.activity)),
+      );
+      expect(find.byType(TLoading), findsOneWidget);
+      expect(
+        tester
+            .widget<TCupertinoActivityIndicator>(
+              find.byType(TCupertinoActivityIndicator),
+            )
+            .activeColor,
+        TThemeData.defaultData().textColorPrimary,
+      );
+    });
+
+    testWidgets('activity 仍响应 Theme iconColor 覆盖', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          const TLoading(icon: TLoadingIcon.activity),
+          loadingTheme: const TLoadingThemeData(iconColor: Colors.red),
+        ),
+      );
+      expect(
+        tester
+            .widget<TCupertinoActivityIndicator>(
+              find.byType(TCupertinoActivityIndicator),
+            )
+            .activeColor,
+        Colors.red,
+      );
+    });
+  });
+
+  // ============================================================
+  // text 文案
+  // ============================================================
+  group('TLoading 文案', () {
+    testWidgets('text 显示加载文案', (tester) async {
+      await tester.pumpWidget(wrapWithTheme(const TLoading(text: '加载中...')));
+      expect(find.text('加载中...'), findsOneWidget);
+    });
+
+    testWidgets('无 text 时正常渲染', (tester) async {
+      await tester.pumpWidget(wrapWithTheme(const TLoading()));
+      expect(find.byType(TLoading), findsOneWidget);
+    });
+  });
+
+  // ============================================================
+  // Tier1：Theme 子树 mergeExtension
+  // ============================================================
+  group('TLoading Theme 子树 mergeExtension', () {
+    testWidgets('mergeExtension 覆盖 axis 方向', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          const TLoading(text: '横向加载'),
+          loadingTheme: const TLoadingThemeData(axis: Axis.horizontal),
+        ),
+      );
+      expect(find.text('横向加载'), findsOneWidget);
+      expect(find.byType(TLoading), findsOneWidget);
+      expect(tester.widget<Flex>(find.byType(Flex)).direction, Axis.horizontal);
+    });
+
+    testWidgets('mergeExtension 覆盖 iconColor 颜色', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          const TLoading(),
+          loadingTheme: const TLoadingThemeData(iconColor: Colors.red),
+        ),
+      );
+      expect(find.byType(TLoading), findsOneWidget);
+      expect(
+        tester.widget<TCircleIndicator>(find.byType(TCircleIndicator)).color,
+        Colors.red,
+      );
+    });
+
+    testWidgets('mergeExtension 覆盖 textColor 颜色', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          const TLoading(text: '颜色测试'),
+          loadingTheme: const TLoadingThemeData(textColor: Colors.blue),
+        ),
+      );
+      expect(find.text('颜色测试'), findsOneWidget);
+      expect(
+        tester.widget<TText>(_loadingTextFinder('颜色测试')).style?.color,
+        Colors.blue,
+      );
+    });
+
+    testWidgets('mergeExtension 覆盖 duration 动画速度', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          const TLoading(),
+          loadingTheme: const TLoadingThemeData(duration: 1000),
+        ),
+      );
+      expect(find.byType(TLoading), findsOneWidget);
+    });
+
+    testWidgets('实例 customIcon 按 duration 持续旋转', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          const TLoading(
+            size: 30,
+            customIcon: SizedBox(
+              key: Key('custom-icon'),
+              width: 50,
+              height: 50,
+              child: Icon(Icons.refresh),
+            ),
+          ),
+        ),
+      );
+      expect(find.byIcon(Icons.refresh), findsOneWidget);
+      expect(
+        tester.getSize(find.byKey(const Key('custom-icon'))),
+        const Size.square(30),
+      );
+
+      final rotation = tester.widget<RotationTransition>(
+        find.ancestor(
+          of: find.byKey(const Key('custom-icon')),
+          matching: find.byType(RotationTransition),
+        ),
+      );
+      final initialTurns = rotation.turns.value;
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(rotation.turns.value, isNot(initialTurns));
+      expect(rotation.turns.value, closeTo(0.25, 0.01));
+    });
+
+    testWidgets('customIcon 响应 Theme duration 更新', (tester) async {
+      var duration = 800;
+      late StateSetter setState;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: StatefulBuilder(
+            builder: (context, update) {
+              setState = update;
+              return Theme(
+                data: Theme.of(
+                  context,
+                ).mergeExtension(TLoadingThemeData(duration: duration)),
+                child: const Scaffold(
+                  body: TLoading(
+                    customIcon: Icon(Icons.refresh, key: Key('custom-icon')),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 200));
+      final rotation = tester.widget<RotationTransition>(
+        find.ancestor(
+          of: find.byKey(const Key('custom-icon')),
+          matching: find.byType(RotationTransition),
+        ),
+      );
+      expect(rotation.turns.value, closeTo(0.25, 0.01));
+      final turnsBeforeUpdate = rotation.turns.value;
+
+      setState(() => duration = 1600);
+      await tester.pump();
+      final rotationAfterUpdate = tester.widget<RotationTransition>(
+        find.ancestor(
+          of: find.byKey(const Key('custom-icon')),
+          matching: find.byType(RotationTransition),
+        ),
+      );
+      final turnsAfterUpdate = rotationAfterUpdate.turns.value;
+      expect(turnsAfterUpdate, closeTo(turnsBeforeUpdate, 0.01));
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(
+        rotationAfterUpdate.turns.value - turnsAfterUpdate,
+        closeTo(0.125, 0.01),
+      );
+    });
+
+    testWidgets('customIcon 在 icon 为 null 时仍保持最高优先级', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          const TLoading(
+            icon: null,
+            text: '自定义加载',
+            customIcon: Icon(Icons.refresh, key: Key('custom-icon')),
+          ),
+        ),
+      );
+
+      expect(find.byKey(const Key('custom-icon')), findsOneWidget);
+      expect(find.byType(RotationTransition), findsAtLeastNWidgets(1));
+      expect(find.text('自定义加载'), findsOneWidget);
+    });
+
+    testWidgets('未注入 Theme 时使用默认值', (tester) async {
+      final token = TThemeData.defaultData();
+      await tester.pumpWidget(wrapWithTheme(const TLoading(text: '默认')));
+      expect(find.text('默认'), findsOneWidget);
+      expect(find.byType(TLoading), findsOneWidget);
+      final text = tester.widget<TText>(_loadingTextFinder('默认'));
+      expect(text.style?.color, token.textColorPrimary);
+      expect(text.font, token.fontBodyMedium);
+      expect(text.style?.fontWeight, FontWeight.w400);
+      expect(text.textAlign, TextAlign.center);
+    });
+  });
+
+  // ============================================================
+  // TLoadingController
+  // ============================================================
+  group('TLoadingController', () {
+    testWidgets('所属 Overlay 卸载后可在新 Overlay 展示，无需主动 dismiss', (tester) async {
+      late BuildContext current;
+      Widget app() => wrapWithTheme(
+        Builder(
+          builder: (context) {
+            current = context;
+            return const SizedBox();
+          },
+        ),
+      );
+      await tester.pumpWidget(app());
+      TLoadingController.show(current, text: '旧加载');
+      await tester.pump();
+      expect(find.text('旧加载'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpWidget(app());
+      TLoadingController.show(current, text: '新加载');
+      await tester.pump();
+      expect(find.text('新加载'), findsOneWidget);
+      TLoadingController.dismiss();
+      TLoadingController.dismiss();
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('首次绘制前 Overlay 卸载不阻塞新展示', (tester) async {
+      late BuildContext current;
+      Widget app() => wrapWithTheme(
+        Builder(
+          builder: (context) {
+            current = context;
+            return const SizedBox();
+          },
+        ),
+      );
+      await tester.pumpWidget(app());
+      TLoadingController.show(current, text: '未绘制');
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpWidget(app());
+      TLoadingController.show(current, text: '已恢复');
+      await tester.pump();
+      expect(find.text('已恢复'), findsOneWidget);
+      TLoadingController.dismiss();
+      await tester.pump();
+    });
+
+    testWidgets('旧 Entry 延迟卸载不会清除新展示', (tester) async {
+      late BuildContext current;
+      await tester.pumpWidget(
+        wrapWithTheme(
+          Builder(
+            builder: (context) {
+              current = context;
+              return const SizedBox();
+            },
+          ),
+        ),
+      );
+      TLoadingController.show(current, text: '第一次');
+      await tester.pump();
+      TLoadingController.dismiss();
+      TLoadingController.show(current, text: '第二次');
+      await tester.pump();
+      TLoadingController.show(current, text: '不能替换');
+      await tester.pump();
+      expect(find.text('第二次'), findsOneWidget);
+      expect(find.text('不能替换'), findsNothing);
+      TLoadingController.dismiss();
+      await tester.pump();
+    });
+
+    testWidgets('普通页面离开但根 Overlay 尚存时保持全局加载', (tester) async {
+      late BuildContext current;
+      await tester.pumpWidget(
+        wrapWithTheme(
+          Builder(
+            builder: (context) {
+              current = context;
+              return const SizedBox();
+            },
+          ),
+        ),
+      );
+      TLoadingController.show(current, text: '全局任务');
+      await tester.pump();
+      await tester.pumpWidget(wrapWithTheme(const Text('新的页面')));
+      expect(find.text('全局任务'), findsOneWidget);
+      TLoadingController.dismiss();
+      await tester.pump();
+    });
+
+    testWidgets('不透明覆盖层遮挡不视为所属 Overlay 卸载', (tester) async {
+      late BuildContext current;
+      await tester.pumpWidget(
+        wrapWithTheme(
+          Builder(
+            builder: (context) {
+              current = context;
+              return const SizedBox();
+            },
+          ),
+        ),
+      );
+      TLoadingController.show(current, text: '保留加载');
+      await tester.pump();
+      final cover = OverlayEntry(
+        opaque: true,
+        builder: (context) =>
+            const ColoredBox(color: Colors.white, child: Text('覆盖层')),
+      );
+      Overlay.of(current).insert(cover);
+      await tester.pump();
+      expect(find.text('保留加载'), findsNothing);
+      TLoadingController.show(current, text: '不能替换');
+      cover.remove();
+      cover.dispose();
+      await tester.pump();
+      expect(find.text('保留加载'), findsOneWidget);
+      expect(find.text('不能替换'), findsNothing);
+      TLoadingController.dismiss();
+      await tester.pump();
+    });
+
+    testWidgets('缺少 Overlay 时不污染后续显示状态', (tester) async {
+      late BuildContext bareContext;
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: Builder(
+            builder: (context) {
+              bareContext = context;
+              return const SizedBox();
+            },
+          ),
+        ),
+      );
+
+      TLoadingController.show(bareContext, text: '不可显示');
+      expect(tester.takeException(), isNull);
+
+      late BuildContext overlayContext;
+      await tester.pumpWidget(
+        wrapWithTheme(
+          Builder(
+            builder: (context) {
+              overlayContext = context;
+              return const SizedBox();
+            },
+          ),
+        ),
+      );
+      TLoadingController.show(overlayContext, text: '可以显示');
+      await tester.pump();
+      expect(find.text('可以显示'), findsOneWidget);
+      TLoadingController.dismiss();
+      await tester.pump();
+    });
+
+    testWidgets('show + dismiss', (tester) async {
+      late BuildContext ctx;
+      await tester.pumpWidget(
+        wrapWithTheme(
+          Builder(
+            builder: (context) {
+              ctx = context;
+              return const SizedBox();
+            },
+          ),
+        ),
+      );
+      TLoadingController.show(ctx, text: '加载中');
+      await tester.pump();
+      expect(find.text('加载中'), findsOneWidget);
+      TLoadingController.dismiss();
+      await tester.pump();
+      expect(find.text('加载中'), findsNothing);
+    });
+
+    testWidgets('show 带 theme', (tester) async {
+      late BuildContext ctx;
+      await tester.pumpWidget(
+        wrapWithTheme(
+          Builder(
+            builder: (context) {
+              ctx = context;
+              return const SizedBox();
+            },
+          ),
+        ),
+      );
+      TLoadingController.show(ctx, theme: const TLoadingThemeData());
+      await tester.pump();
+      expect(find.byType(TLoading), findsOneWidget);
+      TLoadingController.dismiss();
+      await tester.pump();
+    });
+
+    testWidgets('保留触发子树的 ThemeExtension', (tester) async {
+      late BuildContext ctx;
+      final base = TThemeBuilder.light(TThemeData.defaultData());
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: base,
+          home: Theme(
+            data: base.mergeExtension(
+              const TLoadingThemeData(iconColor: Colors.purple),
+            ),
+            child: Builder(
+              builder: (context) {
+                ctx = context;
+                return const SizedBox();
+              },
+            ),
+          ),
+        ),
+      );
+      TLoadingController.show(ctx, text: '局部主题');
+      await tester.pump();
+      final indicator = tester.widget<TCircleIndicator>(
+        find.byType(TCircleIndicator),
+      );
+      expect(indicator.color, Colors.purple);
+      TLoadingController.dismiss();
+      await tester.pump();
+    });
+
+    testWidgets('重复 show 打印 warning', (tester) async {
+      late BuildContext ctx;
+      await tester.pumpWidget(
+        wrapWithTheme(
+          Builder(
+            builder: (context) {
+              ctx = context;
+              return const SizedBox();
+            },
+          ),
+        ),
+      );
+      TLoadingController.show(ctx, text: '第一次');
+      await tester.pump();
+      TLoadingController.show(ctx, text: '第二次');
+      await tester.pump();
+      expect(find.text('第一次'), findsOneWidget);
+      TLoadingController.dismiss();
+      await tester.pump();
+    });
+  });
+
+  // ============================================================
+  // 覆盖率补充
+  // ============================================================
+
+  // TLoading icon=null 覆盖 _textWidget 分支
+  group('TLoading 覆盖率补充', () {
+    testWidgets('icon=null 走 _textWidget', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(const TLoading(icon: null, text: '加载中')),
+      );
+      expect(find.text('加载中'), findsOneWidget);
+    });
+
+    testWidgets('icon=null + refreshWidget 走 Row', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: TThemeBuilder.light(TThemeData.defaultData()),
+          home: const Scaffold(
+            body: TLoading(icon: null, text: '加载中', refreshWidget: Text('刷新')),
+          ),
+        ),
+      );
+      expect(find.text('加载中'), findsOneWidget);
+      expect(find.text('刷新'), findsOneWidget);
+      expect(find.byType(Row), findsOneWidget);
+    });
+
+    testWidgets('icon=point 使用统一 size 并渲染固定间距', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          const TLoading(size: 40, icon: TLoadingIcon.point, text: '加载中'),
+        ),
+      );
+      // point indicator 有无限动画，用 pump 而非 pumpAndSettle
+      await tester.pump();
+      expect(find.text('加载中'), findsOneWidget);
+      expect(
+        tester.getSize(find.byType(TPointBounceIndicator)),
+        const Size.square(40),
+      );
+    });
+  });
+
+  // TPointBounceIndicator didUpdateWidget 覆盖
+  group('TPointBounceIndicator 覆盖率补充', () {
+    testWidgets('didUpdateWidget duration 变化触发更新', (tester) async {
+      var duration = 1000;
+      late StateSetter setState;
+      await tester.pumpWidget(
+        wrapWithTheme(
+          StatefulBuilder(
+            builder: (context, setter) {
+              setState = setter;
+              return TPointBounceIndicator(duration: duration);
+            },
+          ),
+        ),
+      );
+      await tester.pump();
+      // 改变 duration 触发 didUpdateWidget
+      setState(() => duration = 2000);
+      await tester.pump();
+      expect(find.byType(TPointBounceIndicator), findsOneWidget);
+    });
+  });
+
+  // TCircleIndicator 非正方形尺寸覆盖 paint else 分支
+  group('TCircleIndicator 覆盖率补充', () {
+    testWidgets('非正方形尺寸渲染覆盖 else 分支', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          const SizedBox(width: 100, height: 50, child: TCircleIndicator()),
+        ),
+      );
+      await tester.pump();
+      expect(find.byType(TCircleIndicator), findsOneWidget);
+    });
+
+    testWidgets('didUpdateWidget duration 变化触发更新', (tester) async {
+      var duration = 1000;
+      late StateSetter setState;
+      await tester.pumpWidget(
+        wrapWithTheme(
+          StatefulBuilder(
+            builder: (context, setter) {
+              setState = setter;
+              return TCircleIndicator(duration: duration);
+            },
+          ),
+        ),
+      );
+      await tester.pump();
+      setState(() => duration = 1200);
+      await tester.pump();
+      expect(find.byType(TCircleIndicator), findsOneWidget);
+    });
+  });
+
+  // TActivityIndicator didUpdateWidget 覆盖率补充
+  group('TActivityIndicator 覆盖率补充', () {
+    testWidgets('didUpdateWidget animating 关闭/开启', (tester) async {
+      var animating = true;
+      var duration = 800;
+      late StateSetter setState;
+      await tester.pumpWidget(
+        wrapWithTheme(
+          StatefulBuilder(
+            builder: (context, setter) {
+              setState = setter;
+              return TCupertinoActivityIndicator(
+                animating: animating,
+                duration: duration,
+              );
+            },
+          ),
+        ),
+      );
+      await tester.pump();
+      // 关闭动画触发 stop
+      setState(() => animating = false);
+      await tester.pump();
+      // 重新开启并改变 duration 触发 repeat
+      setState(() {
+        animating = true;
+        duration = 1000;
+      });
+      await tester.pump();
+      expect(find.byType(TCupertinoActivityIndicator), findsOneWidget);
+    });
+  });
+
+  // ============================================================
+  // 新增契约：默认 duration / axis / 尺寸（对齐官方）
+  // ============================================================
+  group('TLoading 跨端对齐契约', () {
+    testWidgets('size 省略时默认使用 20', (tester) async {
+      await tester.pumpWidget(wrapWithTheme(const TLoading()));
+
+      final indicator = tester.widget<TCircleIndicator>(
+        find.byType(TCircleIndicator),
+      );
+      expect(indicator.size, 20);
+      expect(indicator.lineWidth, 2.5);
+    });
+
+    testWidgets('默认 duration 为 800', (tester) async {
+      await tester.pumpWidget(wrapWithTheme(const TLoading()));
+      final indicator = tester.widget<TCircleIndicator>(
+        find.byType(TCircleIndicator),
+      );
+      expect(indicator.duration, 800);
+    });
+
+    testWidgets('默认 axis 为 horizontal', (tester) async {
+      await tester.pumpWidget(wrapWithTheme(const TLoading(text: '加载')));
+      expect(tester.widget<Flex>(find.byType(Flex)).direction, Axis.horizontal);
+    });
+
+    testWidgets('显式 vertical 覆盖纵向 SizedBox 分支', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          const TLoading(text: '加载'),
+          loadingTheme: const TLoadingThemeData(axis: Axis.vertical),
+        ),
+      );
+      expect(tester.widget<Flex>(find.byType(Flex)).direction, Axis.vertical);
+    });
+
+    testWidgets('circle 支持 24/28/32 自定义尺寸', (tester) async {
+      Future<void> check(double size) async {
+        await tester.pumpWidget(
+          wrapWithTheme(TLoading(size: size, icon: TLoadingIcon.circle)),
+        );
+        final indicator = tester.widget<TCircleIndicator>(
+          find.byType(TCircleIndicator),
+        );
+        expect(indicator.size, size);
+        expect(indicator.lineWidth, size / 8);
+      }
+
+      await check(24);
+      await check(28);
+      await check(32);
+    });
+
+    testWidgets('activity 使用 size 的一半作为半径', (tester) async {
+      Future<void> check(double size) async {
+        await tester.pumpWidget(
+          wrapWithTheme(TLoading(size: size, icon: TLoadingIcon.activity)),
+        );
+        final indicator = tester.widget<TCupertinoActivityIndicator>(
+          find.byType(TCupertinoActivityIndicator),
+        );
+        expect(indicator.radius, size / 2);
+      }
+
+      await check(20);
+      await check(22);
+      await check(26);
+    });
+  });
+
+  // ============================================================
+  // TLoadingThemeData 单元：merge / copyWith / lerp
+  // ============================================================
+  group('TLoadingThemeData 单元', () {
+    testWidgets('merge 优先级与字段透传', (tester) async {
+      const base = TLoadingThemeData(
+        iconColor: Colors.red,
+        textColor: Colors.blue,
+        axis: Axis.vertical,
+        duration: 1000,
+      );
+      const other = TLoadingThemeData(duration: 1200);
+      final merged = base.merge(other);
+      expect(merged.iconColor, Colors.red);
+      expect(merged.textColor, Colors.blue);
+      expect(merged.axis, Axis.vertical);
+      expect(merged.duration, 1200);
+      // null 时返回自身
+      expect(base.merge(null), same(base));
+    });
+
+    testWidgets('copyWith 字段更新', (tester) async {
+      const base = TLoadingThemeData(iconColor: Colors.red, duration: 1000);
+      final copied = base.copyWith(
+        iconColor: Colors.green,
+        textColor: Colors.orange,
+        axis: Axis.horizontal,
+        duration: 800,
+      );
+      expect(copied.iconColor, Colors.green);
+      expect(copied.textColor, Colors.orange);
+      expect(copied.axis, Axis.horizontal);
+      expect(copied.duration, 800);
+      // 未传字段保持原值
+      final partial = base.copyWith();
+      expect(partial.iconColor, Colors.red);
+      expect(partial.duration, 1000);
+    });
+
+    testWidgets('lerp 字段插值', (tester) async {
+      const a = TLoadingThemeData(
+        iconColor: Colors.black,
+        textColor: Colors.black,
+        axis: Axis.vertical,
+        duration: 800,
+      );
+      const b = TLoadingThemeData(
+        iconColor: Colors.white,
+        textColor: Colors.white,
+        axis: Axis.horizontal,
+        duration: 1600,
+      );
+      final lerped = a.lerp(b, 0.5);
+      expect(lerped, isNotNull);
+      expect(lerped.axis, isNot(same(a.axis)));
+      // 非 TLoadingThemeData 返回自身
+      final other = a.lerp(null, 0.5);
+      expect(other, same(a));
+    });
+  });
+}
+
+Finder _loadingTextFinder(String data) {
+  return find.byWidgetPredicate(
+    (widget) => widget is TText && widget.data == data,
+  );
+}
+
+class _LoadingLifecycleProbe extends StatefulWidget {
+  const _LoadingLifecycleProbe({
+    required this.onMount,
+    required this.onDispose,
+  });
+  final VoidCallback onMount;
+  final VoidCallback onDispose;
+  @override
+  State<_LoadingLifecycleProbe> createState() => _LoadingLifecycleProbeState();
+}
+
+class _LoadingLifecycleProbeState extends State<_LoadingLifecycleProbe> {
+  @override
+  void initState() {
+    super.initState();
+    widget.onMount();
+  }
+
+  @override
+  void dispose() {
+    widget.onDispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => const Text('loading lifecycle');
+}

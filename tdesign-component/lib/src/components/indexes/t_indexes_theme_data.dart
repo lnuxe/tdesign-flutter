@@ -1,0 +1,315 @@
+import 'dart:ui' show lerpDouble;
+
+import 'package:flutter/material.dart';
+
+import '../../theme/basic.dart' show Font;
+
+/// 索引组件的子树级视觉主题。
+///
+/// 仅管理尺寸、颜色和字体。吸顶、滚动方向与胶囊模式属于组件实例行为。
+///
+/// {@category ComponentTheme}
+class TIndexesThemeData extends ThemeExtension<TIndexesThemeData> {
+  const TIndexesThemeData({
+    this.indexListMaxHeight,
+    this.sidebarRight,
+    this.indexItemSize,
+    this.indexItemSpacing,
+    this.tipSize,
+    this.tipMaxWidth,
+    this.tipGap,
+    this.indexColor,
+    this.activeIndexColor,
+    this.activeIndexBackgroundColor,
+    this.tipColor,
+    this.tipBackgroundColor,
+    this.indexFont,
+    this.activeIndexFont,
+    this.tipFont,
+    this.anchorColor,
+    this.activeAnchorColor,
+    this.anchorBackgroundColor,
+    this.activeAnchorBackgroundColor,
+    this.anchorBorderColor,
+    this.anchorFont,
+    this.activeAnchorFont,
+    this.anchorVerticalPadding,
+    this.anchorHorizontalPadding,
+    this.capsuleMargin,
+  }) : assert(
+         indexListMaxHeight == null ||
+             indexListMaxHeight > 0 && indexListMaxHeight <= 1,
+       ),
+       assert(indexItemSize == null || indexItemSize > 0),
+       assert(indexItemSpacing == null || indexItemSpacing >= 0),
+       assert(tipSize == null || tipSize > 0),
+       assert(tipMaxWidth == null || tipSize == null || tipMaxWidth >= tipSize);
+
+  /// 索引列表最大高度占父容器高度的比例。
+  final double? indexListMaxHeight;
+
+  /// 侧栏距容器右侧的距离。
+  final double? sidebarRight;
+
+  /// 单个索引的尺寸；显式值保持固定，默认至少 20 并随内置文字自然行高增长。
+  final double? indexItemSize;
+
+  /// 相邻索引之间的距离。
+  final double? indexItemSpacing;
+
+  /// 按压提示的最小尺寸；显式值保持固定，默认可随内置文字自然行高增长。
+  final double? tipSize;
+
+  /// 按压提示的最大宽度。
+  final double? tipMaxWidth;
+
+  /// 按压提示与索引之间的距离。
+  final double? tipGap;
+
+  /// 普通索引文字颜色。
+  final Color? indexColor;
+
+  /// 激活索引文字颜色。
+  final Color? activeIndexColor;
+
+  /// 激活索引背景色。
+  final Color? activeIndexBackgroundColor;
+
+  /// 按压提示文字颜色。
+  final Color? tipColor;
+
+  /// 按压提示背景色。
+  final Color? tipBackgroundColor;
+
+  /// 普通索引字体。
+  final Font? indexFont;
+
+  /// 激活索引字体。
+  final Font? activeIndexFont;
+
+  /// 按压提示字体。
+  final Font? tipFont;
+
+  /// 普通锚点文字颜色。
+  final Color? anchorColor;
+
+  /// 激活锚点文字颜色。
+  final Color? activeAnchorColor;
+
+  /// 普通锚点背景色。
+  final Color? anchorBackgroundColor;
+
+  /// 激活锚点背景色。
+  final Color? activeAnchorBackgroundColor;
+
+  /// 激活锚点边框颜色。
+  final Color? anchorBorderColor;
+
+  /// 普通锚点字体。
+  final Font? anchorFont;
+
+  /// 激活锚点字体。
+  final Font? activeAnchorFont;
+
+  /// 锚点垂直内边距。
+  final double? anchorVerticalPadding;
+
+  /// 锚点水平内边距。
+  final double? anchorHorizontalPadding;
+
+  /// 胶囊锚点的水平外边距。
+  final double? capsuleMargin;
+
+  /// 复制主题配置。
+  ///
+  /// ## 返回值
+  /// 返回主题副本；非空参数替换对应配置，null 参数保留当前配置。
+  @override
+  TIndexesThemeData copyWith({
+    double? indexListMaxHeight,
+    double? sidebarRight,
+    double? indexItemSize,
+    double? indexItemSpacing,
+    double? tipSize,
+    double? tipMaxWidth,
+    double? tipGap,
+    Color? indexColor,
+    Color? activeIndexColor,
+    Color? activeIndexBackgroundColor,
+    Color? tipColor,
+    Color? tipBackgroundColor,
+    Font? indexFont,
+    Font? activeIndexFont,
+    Font? tipFont,
+    Color? anchorColor,
+    Color? activeAnchorColor,
+    Color? anchorBackgroundColor,
+    Color? activeAnchorBackgroundColor,
+    Color? anchorBorderColor,
+    Font? anchorFont,
+    Font? activeAnchorFont,
+    double? anchorVerticalPadding,
+    double? anchorHorizontalPadding,
+    double? capsuleMargin,
+  }) {
+    return TIndexesThemeData(
+      indexListMaxHeight: indexListMaxHeight ?? this.indexListMaxHeight,
+      sidebarRight: sidebarRight ?? this.sidebarRight,
+      indexItemSize: indexItemSize ?? this.indexItemSize,
+      indexItemSpacing: indexItemSpacing ?? this.indexItemSpacing,
+      tipSize: tipSize ?? this.tipSize,
+      tipMaxWidth: tipMaxWidth ?? this.tipMaxWidth,
+      tipGap: tipGap ?? this.tipGap,
+      indexColor: indexColor ?? this.indexColor,
+      activeIndexColor: activeIndexColor ?? this.activeIndexColor,
+      activeIndexBackgroundColor:
+          activeIndexBackgroundColor ?? this.activeIndexBackgroundColor,
+      tipColor: tipColor ?? this.tipColor,
+      tipBackgroundColor: tipBackgroundColor ?? this.tipBackgroundColor,
+      indexFont: indexFont ?? this.indexFont,
+      activeIndexFont: activeIndexFont ?? this.activeIndexFont,
+      tipFont: tipFont ?? this.tipFont,
+      anchorColor: anchorColor ?? this.anchorColor,
+      activeAnchorColor: activeAnchorColor ?? this.activeAnchorColor,
+      anchorBackgroundColor:
+          anchorBackgroundColor ?? this.anchorBackgroundColor,
+      activeAnchorBackgroundColor:
+          activeAnchorBackgroundColor ?? this.activeAnchorBackgroundColor,
+      anchorBorderColor: anchorBorderColor ?? this.anchorBorderColor,
+      anchorFont: anchorFont ?? this.anchorFont,
+      activeAnchorFont: activeAnchorFont ?? this.activeAnchorFont,
+      anchorVerticalPadding:
+          anchorVerticalPadding ?? this.anchorVerticalPadding,
+      anchorHorizontalPadding:
+          anchorHorizontalPadding ?? this.anchorHorizontalPadding,
+      capsuleMargin: capsuleMargin ?? this.capsuleMargin,
+    );
+  }
+
+  /// 生成主题过渡配置。
+  ///
+  /// ## 返回值
+  /// 按 t 在当前主题和目标主题之间生成过渡主题。
+  /// other 为空或类型不匹配时返回当前主题；字段各自采用其类型的插值规则。
+  @override
+  TIndexesThemeData lerp(
+    /// 目标主题；为空或类型不匹配时保留当前主题。
+    ThemeExtension<TIndexesThemeData>? other,
+
+    /// 插值进度；通常 0 表示当前主题，1 表示目标主题。
+    double t,
+  ) {
+    if (other is! TIndexesThemeData) {
+      return this;
+    }
+    return TIndexesThemeData(
+      indexListMaxHeight: _lerpDoubleWithDefault(
+        indexListMaxHeight,
+        other.indexListMaxHeight,
+        t,
+        0.8,
+      ),
+      sidebarRight: _lerpNullableDouble(sidebarRight, other.sidebarRight, t),
+      indexItemSize: _lerpDoubleWithDefault(
+        indexItemSize,
+        other.indexItemSize,
+        t,
+        20,
+      ),
+      indexItemSpacing: _lerpDoubleWithDefault(
+        indexItemSpacing,
+        other.indexItemSpacing,
+        t,
+        2,
+      ),
+      tipSize: _lerpNullableDouble(tipSize, other.tipSize, t),
+      tipMaxWidth: _lerpDoubleWithDefault(
+        tipMaxWidth,
+        other.tipMaxWidth,
+        t,
+        99,
+      ),
+      tipGap: _lerpNullableDouble(tipGap, other.tipGap, t),
+      indexColor: _lerpNullableColor(indexColor, other.indexColor, t),
+      activeIndexColor: _lerpNullableColor(
+        activeIndexColor,
+        other.activeIndexColor,
+        t,
+      ),
+      activeIndexBackgroundColor: _lerpNullableColor(
+        activeIndexBackgroundColor,
+        other.activeIndexBackgroundColor,
+        t,
+      ),
+      tipColor: _lerpNullableColor(tipColor, other.tipColor, t),
+      tipBackgroundColor: _lerpNullableColor(
+        tipBackgroundColor,
+        other.tipBackgroundColor,
+        t,
+      ),
+      indexFont: t < 0.5 ? indexFont : other.indexFont,
+      activeIndexFont: t < 0.5 ? activeIndexFont : other.activeIndexFont,
+      tipFont: t < 0.5 ? tipFont : other.tipFont,
+      anchorColor: _lerpNullableColor(anchorColor, other.anchorColor, t),
+      activeAnchorColor: _lerpNullableColor(
+        activeAnchorColor,
+        other.activeAnchorColor,
+        t,
+      ),
+      anchorBackgroundColor: _lerpNullableColor(
+        anchorBackgroundColor,
+        other.anchorBackgroundColor,
+        t,
+      ),
+      activeAnchorBackgroundColor: _lerpNullableColor(
+        activeAnchorBackgroundColor,
+        other.activeAnchorBackgroundColor,
+        t,
+      ),
+      anchorBorderColor: _lerpNullableColor(
+        anchorBorderColor,
+        other.anchorBorderColor,
+        t,
+      ),
+      anchorFont: t < 0.5 ? anchorFont : other.anchorFont,
+      activeAnchorFont: t < 0.5 ? activeAnchorFont : other.activeAnchorFont,
+      anchorVerticalPadding: _lerpNullableDouble(
+        anchorVerticalPadding,
+        other.anchorVerticalPadding,
+        t,
+      ),
+      anchorHorizontalPadding: _lerpNullableDouble(
+        anchorHorizontalPadding,
+        other.anchorHorizontalPadding,
+        t,
+      ),
+      capsuleMargin: _lerpNullableDouble(capsuleMargin, other.capsuleMargin, t),
+    );
+  }
+}
+
+double? _lerpDoubleWithDefault(
+  double? begin,
+  double? end,
+  double t,
+  double defaultValue,
+) {
+  if (begin == null && end == null) {
+    return null;
+  }
+  return lerpDouble(begin ?? defaultValue, end ?? defaultValue, t);
+}
+
+double? _lerpNullableDouble(double? begin, double? end, double t) {
+  if (begin == null || end == null) {
+    return t < 0.5 ? begin : end;
+  }
+  return lerpDouble(begin, end, t);
+}
+
+Color? _lerpNullableColor(Color? begin, Color? end, double t) {
+  if (begin == null || end == null) {
+    return t < 0.5 ? begin : end;
+  }
+  return Color.lerp(begin, end, t);
+}

@@ -1,0 +1,1063 @@
+{
+  "schemaVersion": 1,
+  "components": [
+    {
+      "slug": "button",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/button"
+      },
+      "api": {
+        "names": [
+          "TButton",
+          "TButtonColorPreset",
+          "TButtonThemeData",
+          "TButtonSize",
+          "TButtonVariant",
+          "TButtonIconPosition",
+          "TButtonShape"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "divider",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/divider"
+      },
+      "api": {
+        "names": [
+          "TDivider",
+          "TDividerLayout",
+          "TDividerAlign",
+          "TDividerThemeData"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "fab",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/fab"
+      },
+      "api": {
+        "names": [
+          "TFab",
+          "TFabDragAxis",
+          "TFabMagnet",
+          "TFabBounds",
+          "TFabDragDetails",
+          "TFabDragCallback",
+          "TFabThemeData"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "icon",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/icon"
+      },
+      "api": {
+        "names": [
+          "TIcon"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "link",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/link"
+      },
+      "api": {
+        "names": [
+          "TLink",
+          "TLinkColorPreset",
+          "TLinkThemeData",
+          "TLinkSize"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "text",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/text"
+      },
+      "api": {
+        "names": [
+          "TText",
+          "TTextSpan",
+          "TTextThemeData",
+          "TFontLoader"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "back-top",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/backtop"
+      },
+      "api": {
+        "names": [
+          "TBackTop",
+          "TBackTopThemeData",
+          "TBackTopShape",
+          "TBackTopColorPreset"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "drawer",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/drawer"
+      },
+      "api": {
+        "names": [
+          "TDrawer",
+          "TDrawerHandle",
+          "TDrawerPlacement",
+          "TDrawerThemeData",
+          "TDrawerItem",
+          "TDrawerItemClickCallback"
+        ],
+        "getComments": true,
+        "functions": [
+          "showTDrawer"
+        ]
+      }
+    },
+    {
+      "slug": "indexes",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/indexes"
+      },
+      "api": {
+        "names": [
+          "TIndexes",
+          "TIndexesAnchor",
+          "TIndexesList",
+          "TIndexesThemeData",
+          "SliverStickyHeaderWidgetBuilder",
+          "StickyHeaderController",
+          "DefaultStickyHeaderController",
+          "SliverStickyHeaderState",
+          "SliverStickyHeader",
+          "SliverStickyHeaderRenderObjectElement"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "navbar",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/navbar"
+      },
+      "api": {
+        "names": [
+          "TNavBar",
+          "TNavBarItem",
+          "TNavBarBorder",
+          "TNavBarThemeData"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "side-bar",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/sidebar"
+      },
+      "api": {
+        "names": [
+          "TSideBar",
+          "TSideBarItem",
+          "TSideBarThemeData",
+          "TSideBarVariant"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "steps",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/steps"
+      },
+      "api": {
+        "names": [
+          "TSteps",
+          "TStepsItemData",
+          "TStepsDirection",
+          "TStepsIndicator",
+          "TStepsStatus"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "tab-bar",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/tabbar"
+      },
+      "api": {
+        "names": [
+          "TTabBar",
+          "TTabBarItemConfig",
+          "TTabBarPopUpBtnConfig",
+          "TTabBarPopUpShapeConfig",
+          "TTabBarMenuItem",
+          "TTabBarThemeData",
+          "TTabBarType",
+          "TTabBarItemStyle",
+          "TTabBarStyle",
+          "TTabBarIconTextLayout",
+          "TTabBarIndicatorAnimation"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "tabs",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/tabs"
+      },
+      "api": {
+        "names": [
+          "TTabsBar",
+          "TTab",
+          "TTabsBarView",
+          "TTabsBarIndicator",
+          "TTabsBarThemeData",
+          "TTabsBarVariant",
+          "TTabsBarSize"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "calendar",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/calendar"
+      },
+      "api": {
+        "names": [
+          "TCalendar",
+          "TCalendarCellModel",
+          "TCalendarSubtitleContext",
+          "TCalendarSubtitleBuilder",
+          "TCalendarCellBuilder",
+          "TCalendarMonthTitleBuilder",
+          "DateSelectType",
+          "TCalendarFirstDayOfWeek",
+          "TCalendarThemeData",
+          "TCalendarVariant"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "cascader",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/cascader"
+      },
+      "api": {
+        "names": [
+          "TCascader",
+          "TCascaderOption",
+          "TCascaderThemeData",
+          "TCascaderVariant"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "checkbox",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/checkbox"
+      },
+      "api": {
+        "names": [
+          "TCheckbox",
+          "TCheckboxGroup",
+          "TContentDirection",
+          "TCheckboxSize",
+          "TCheckboxIconBuilder",
+          "TCheckboxOption",
+          "TCheckboxOptionBuilder",
+          "TCheckboxThemeData",
+          "TCheckboxVariant"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "picker",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/picker"
+      },
+      "api": {
+        "names": [
+          "TPicker",
+          "TPickerPopup",
+          "TPickerOption",
+          "TPickerValue",
+          "TPickerColumns",
+          "TPickerLinked",
+          "TPickerPopupHeaderBuilder",
+          "TPickerThemeData",
+          "TPickerItemBuilder",
+          "TPickerItems"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "date-time-picker",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/date_time_picker"
+      },
+      "api": {
+        "names": [
+          "TDateTimePicker",
+          "DateTimePickerMode",
+          "TDateTimePickerValue",
+          "DateTimePickerSteps",
+          "DateMode",
+          "TimeMode",
+          "DateTimeColumn",
+          "DateTimePickerRenderLabel"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "form",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/form"
+      },
+      "api": {
+        "names": [
+          "TForm",
+          "TFormState",
+          "TFormController",
+          "TFormField",
+          "TFormFieldBuilder",
+          "TFormItem",
+          "TFormLayout",
+          "TFormRequiredMarkPosition",
+          "TFormItemVerticalAlignment",
+          "TFormThemeData",
+          "TFormItemContentAlignment"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "input",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/input"
+      },
+      "api": {
+        "names": [
+          "TInput",
+          "TInputThemeData",
+          "TInputClearButtonMode",
+          "TInputStatus"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "radio",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/radio"
+      },
+      "api": {
+        "names": [
+          "TRadio",
+          "TRadioGroup",
+          "TRadioOption",
+          "TRadioSize",
+          "TRadioIconType",
+          "TRadioVariant",
+          "TRadioIconBuilder",
+          "TRadioThemeData"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "rate",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/rate"
+      },
+      "api": {
+        "names": [
+          "TRate",
+          "TRateIconBuilder",
+          "TRateThemeData"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "search",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/search"
+      },
+      "api": {
+        "names": [
+          "TSearchBar",
+          "TSearchBarThemeData",
+          "TSearchBarVariant",
+          "TSearchBarAlignment"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "slider",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/slider"
+      },
+      "api": {
+        "names": [
+          "TSlider",
+          "TRangeSlider",
+          "TSliderVariant",
+          "TSliderThemeData",
+          "TSliderThumbFormatter"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "stepper",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/stepper"
+      },
+      "api": {
+        "names": [
+          "TStepper",
+          "TStepperThemeData",
+          "TStepperSize",
+          "TStepperVariant"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "switch",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/switch"
+      },
+      "api": {
+        "names": [
+          "TSwitch",
+          "TSwitchThemeData",
+          "TSwitchSize",
+          "TSwitchVariant"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "textarea",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/textarea"
+      },
+      "api": {
+        "names": [
+          "TTextarea",
+          "TTextareaLayout"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "tree-select",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/tree"
+      },
+      "api": {
+        "names": [
+          "TTreeSelect",
+          "TTreeSelectOption",
+          "TTreeSelectThemeData"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "upload",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/upload"
+      },
+      "api": {
+        "names": [
+          "TUpload",
+          "TUploadFile",
+          "TUploadFileStatus",
+          "TUploadLayout",
+          "TUploadThemeData",
+          "TUploadVariant",
+          "TUploadMediaType",
+          "TUploadValidationError",
+          "TUploadPicker"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "avatar",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/avatar"
+      },
+      "api": {
+        "names": [
+          "TAvatar",
+          "TAvatarGroup",
+          "TAvatarThemeData",
+          "TAvatarSize",
+          "TAvatarShape",
+          "TAvatarGroupCascading"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "badge",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/badge"
+      },
+      "api": {
+        "names": [
+          "TBadge",
+          "TBadgeConfig",
+          "TBadgeThemeData",
+          "TBadgeVariant",
+          "TBadgeSize"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "cell",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/cell"
+      },
+      "api": {
+        "names": [
+          "TCell",
+          "TCellGroup",
+          "TCellThemeData",
+          "TCellAlign",
+          "TCellGroupBuilder",
+          "TCellGroupVariant"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "time-counter",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/time_counter"
+      },
+      "api": {
+        "names": [
+          "TTimeCounter",
+          "TTimeCounterController",
+          "TTimeCounterThemeData",
+          "TTimeCounterDirection",
+          "TTimeCounterSize",
+          "TTimeCounterVariant",
+          "TTimeCounterBuilder"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "collapse",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/collapse"
+      },
+      "api": {
+        "names": [
+          "TCollapse",
+          "TCollapsePanelBuilder",
+          "TCollapsePanel",
+          "TCollapseThemeData",
+          "TCollapseMode",
+          "TCollapseVariant",
+          "TCollapsePlacement"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "empty",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/empty"
+      },
+      "api": {
+        "names": [
+          "TEmpty",
+          "TEmptyThemeData"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "footer",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/footer"
+      },
+      "api": {
+        "names": [
+          "TFooter",
+          "TFooterThemeData"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "image",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/image"
+      },
+      "api": {
+        "names": [
+          "TImage",
+          "TImageShape",
+          "TImageThemeData"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "image-viewer",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/image_viewer"
+      },
+      "api": {
+        "names": [
+          "TImageViewer",
+          "TImageViewerItemBuilder",
+          "TImageViewerThemeData"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "progress",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/progress"
+      },
+      "api": {
+        "names": [
+          "TProgress",
+          "TProgressThemeData",
+          "TProgressVariant",
+          "TProgressStatus"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "result",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/result"
+      },
+      "api": {
+        "names": [
+          "TResult",
+          "TResultStatus",
+          "TResultThemeData"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "skeleton",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/skeleton"
+      },
+      "api": {
+        "names": [
+          "TSkeleton",
+          "TSkeletonLayout",
+          "TSkeletonBlockStyle",
+          "TSkeletonBlock",
+          "TSkeletonAnimation",
+          "TSkeletonVariant",
+          "TSkeletonBlockShape",
+          "TSkeletonThemeData"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "swiper",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/swiper"
+      },
+      "api": {
+        "names": [
+          "TSwiper",
+          "TSwiperController",
+          "TSwiperThemeData",
+          "TSwiperPaginationVariant",
+          "TSwiperPaginationPlacement",
+          "TSwiperPaginationItemDetails",
+          "TSwiperPageEffect",
+          "TSwiperPaginationItemBuilder"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "table",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/table"
+      },
+      "api": {
+        "names": [
+          "TTable",
+          "TTableColumn",
+          "TTableThemeData",
+          "TTableSelectionMode",
+          "TTableSortDirection",
+          "TTableSort",
+          "TTableColumnFixed",
+          "TTableColumnAlign",
+          "TTableCellContext",
+          "TTableCellSpan",
+          "TTableCellSpanBuilder",
+          "TTableCellTap",
+          "TTableRowKey",
+          "TTableRowTap",
+          "TTableCellBuilder"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "tag",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/tag"
+      },
+      "api": {
+        "names": [
+          "TTag",
+          "TSelectTag",
+          "TTagThemeData",
+          "TTagColorPreset",
+          "TTagSize",
+          "TTagShape",
+          "TTagVariant"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "action-sheet",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/action_sheet"
+      },
+      "api": {
+        "names": [
+          "TActionSheetItem",
+          "TActionSheet",
+          "TActionSheetThemeData",
+          "TActionSheetAlign",
+          "TActionSheetGridLayout",
+          "TActionSheetGridMode",
+          "TActionSheetGridSection",
+          "TActionSheetOnSelected"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "dialog",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/dialog"
+      },
+      "api": {
+        "names": [
+          "TDialog",
+          "TDialogAction",
+          "TDialogActionRole",
+          "TConfirmDialog",
+          "TDialogThemeData"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "dropdown-menu",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/dropdown_menu"
+      },
+      "api": {
+        "names": [
+          "TDropdownMenu",
+          "TDropdownMenuOption",
+          "TDropdownSingleSelectPanel",
+          "TDropdownMultiSelectPanel",
+          "TDropdownMenuPlacement",
+          "TDropdownMenuCloseReason",
+          "TDropdownMenuClosedCallback",
+          "TDropdownMenuPanelBuilder",
+          "TDropdownMenuTriggerBuilder",
+          "TDropdownMenuTriggerState",
+          "TDropdownMenuPanelController",
+          "TDropdownMenuItem",
+          "TDropdownMenuController",
+          "TDropdownThemeData"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "loading",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/loading"
+      },
+      "api": {
+        "names": [
+          "TLoading",
+          "TLoadingIcon",
+          "TLoadingController",
+          "TLoadingThemeData"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "message",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/message"
+      },
+      "api": {
+        "names": [
+          "TMessage",
+          "TMessageMarquee",
+          "TMessageHandle",
+          "TMessageThemeData",
+          "TMessageStatus"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "notice-bar",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/notice_bar"
+      },
+      "api": {
+        "names": [
+          "TNoticeBar",
+          "TNoticeBarTapTarget",
+          "TNoticeBarStatus",
+          "TNoticeBarThemeData"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "popover",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/popover"
+      },
+      "api": {
+        "names": [
+          "TPopover",
+          "TPopoverAnchor",
+          "TPopoverController",
+          "TPopoverThemeData",
+          "TPopoverColorPreset",
+          "TPopoverPlacement",
+          "TPopoverAnchorBuilder"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "popup",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/popup"
+      },
+      "api": {
+        "names": [
+          "TPopup",
+          "TPopupHeader",
+          "TPopupOptions",
+          "TPopupHandle",
+          "TPopupOverlayConfig",
+          "TPopupPlacement",
+          "TPopupTrigger",
+          "TPopupInset",
+          "TPopupBottomInset",
+          "TPopupTopInset",
+          "TPopupLeftInset",
+          "TPopupRightInset",
+          "TPopupHeaderBuilder",
+          "TPopupSlotBuilder",
+          "TPopupVisibleChangeCallback",
+          "TPopupThemeData"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "pull-down-refresh",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/refresh"
+      },
+      "api": {
+        "names": [
+          "TPullDownRefresh",
+          "TPullDownRefreshController",
+          "TPullDownRefreshTexts",
+          "TPullDownRefreshState"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "swipe-cell",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/swipe_cell"
+      },
+      "api": {
+        "names": [
+          "TSwipeCell",
+          "TSwipeCellController",
+          "TSwipeCellPanel",
+          "TSwipeCellAction",
+          "TSwipeCellSide",
+          "TSwipeCellChanged",
+          "TSwipeCellThemeData"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "toast",
+      "source": {
+        "type": "folder",
+        "path": "lib/src/components/toast"
+      },
+      "api": {
+        "names": [
+          "TToast",
+          "IconTextDirection",
+          "TToastPlacement",
+          "TOverlayConfig",
+          "TToastThemeData"
+        ],
+        "getComments": true
+      }
+    },
+    {
+      "slug": "theme",
+      "source": {
+        "type": "folder",
+        "path": "lib/src"
+      },
+      "api": {
+        "names": [
+          "TThemeData",
+          "Font",
+          "FontFamily",
+          "TResourceBuilder",
+          "TResourceManager",
+          "TResourceDelegate",
+          "TStyleResolver",
+          "TMaterialThemeBuilder",
+          "TThemeBuilder",
+          "TExtraThemeData",
+          "DefaultMapFactory",
+          "TMap",
+          "PlatformUtil",
+          "TToolbarPressable",
+          "FontExtensions",
+          "TColors",
+          "TResolvedFontFamily",
+          "TFontFamilies",
+          "TFontMetrics",
+          "TFonts",
+          "TRadius",
+          "TBoxShadows",
+          "TInsetShadows",
+          "TSpacers",
+          "TSizes",
+          "TThemeContextExtension",
+          "TThemeDataMergeExtension"
+        ],
+        "getComments": true,
+        "functions": [
+          "setTResourceBuilder"
+        ]
+      }
+    }
+  ]
+}

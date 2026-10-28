@@ -1,0 +1,99 @@
+name: PREVIEW_BUILD
+
+on:
+  pull_request:
+    branches: [develop, main]
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # 先准备共享资源，再并行构建 APK 和预览站点。
+  prepare-demo:
+    uses: ./.github/workflows/prepare-demo.yml
+
+  # 最低支持版本的 APK 同时用于兼容验证与 PR 下载。
+  apk:
+    needs: prepare-demo
+    uses: ./.github/workflows/build-apk.yml
+    with:
+      flutter-version: '3.32.0'
+      version: ${{ needs.prepare-demo.outputs.version }}
+      build-number: ${{ needs.prepare-demo.outputs.build-number }}
+
+  tdesign-flutter-site:
+    needs: prepare-demo
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          package_json_file: tdesign-site/package.json
+
+      - name: Set Node version
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: "pnpm"
+          cache-dependency-path: "tdesign-site/pnpm-lock.yaml"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: 3.32.0
+          channel: stable
+          cache: true
+
+      - name: Download prepared resources
+        uses: actions/download-artifact@v4
+        with:
+          name: demo-assets
+          path: tdesign-component/example/assets
+
+      - name: Build site
+        working-directory: ./tdesign-site
+        run: |
+          pnpm ci
+          pnpm run site
+
+      - name: Build and merge Web Demo
+        working-directory: ./tdesign-component/example
+        run: |
+          set -euo pipefail
+          flutter build web --base-href /flutter/example/
+
+          cd "$GITHUB_WORKSPACE"
+          mkdir -p tdesign-flutter-web/flutter/example/
+          cp -a tdesign-site/_site/. tdesign-flutter-web/
+          rm -rf tdesign-flutter-web/assets
+
+          INDEX_FILE="$GITHUB_WORKSPACE/tdesign-flutter-web/index.html"
+          if ! grep -q '<base href="/">' "$INDEX_FILE"; then
+            sed -i 's|<meta http-equiv="X-UA-Compatible" content="ie=edge">|<meta http-equiv="X-UA-Compatible" content="ie=edge">\n  <base href="/">|' "$INDEX_FILE"
+          fi
+          sed -i "s|src=\"/flutter/|src=\"flutter/|g; s|href=\"/flutter/|href=\"flutter/|g; s|src='/flutter/|src='flutter/|g; s|href='/flutter/|href='flutter/|g" "$INDEX_FILE"
+
+          cp tdesign-site/_site/index.html tdesign-flutter-web/404.html
+          cp tdesign-site/_site/index.html tdesign-flutter-web/200.html
+          cp -a tdesign-site/_site/assets tdesign-flutter-web/flutter/assets
+          cp -a tdesign-component/example/build/web/. tdesign-flutter-web/flutter/example/
+
+          test -f tdesign-flutter-web/index.html
+          test -f tdesign-flutter-web/flutter/example/index.html
+
+      - name: Upload Web artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tdesign-flutter-web
+          path: ${{ github.workspace }}/tdesign-flutter-web
+          if-no-files-found: error
+          retention-days: 5

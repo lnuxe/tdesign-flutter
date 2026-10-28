@@ -1,0 +1,225 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
+
+/// TNavBar Widget 测试
+///
+/// 覆盖标题渲染、自定义标题、leading/actions、useDefaultBack、
+/// onBack 回调、A 类禁用（onTap: null）、Theme 各字段覆盖、preferredSize。
+void main() {
+  TextStyle effectiveTextStyle(WidgetTester tester, String text) {
+    final finder = find.text(text);
+    final textWidget = tester.widget<Text>(finder);
+    return DefaultTextStyle.of(
+      tester.element(finder),
+    ).style.merge(textWidget.style);
+  }
+
+  /// 用 TTheme 包裹以提供基础 Token
+  Widget wrapWithTheme(Widget child, {TNavBarThemeData? navBarTheme}) {
+    final themeExtensions = <ThemeExtension>[
+      if (navBarTheme != null) navBarTheme,
+    ];
+    return MaterialApp(
+      theme: ThemeData(
+        extensions: [TThemeData.defaultData(), ...themeExtensions],
+      ),
+      home: Scaffold(body: child),
+    );
+  }
+
+  group('TNavBar 基础渲染', () {
+    testWidgets('默认标题渲染', (tester) async {
+      await tester.pumpWidget(wrapWithTheme(const TNavBar(title: Text('首页'))));
+      expect(find.text('首页'), findsOneWidget);
+      expect(find.byType(TNavBar), findsOneWidget);
+    });
+
+    testWidgets('title 支持自定义 Widget', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(const TNavBar(title: Text('自定义标题'))),
+      );
+      expect(find.text('自定义标题'), findsOneWidget);
+      expect(find.text('文本标题'), findsNothing);
+    });
+
+    testWidgets('默认不显示返回按钮', (tester) async {
+      await tester.pumpWidget(wrapWithTheme(const TNavBar(title: Text('测试'))));
+      expect(find.byIcon(TIcons.chevron_left), findsNothing);
+    });
+
+    testWidgets('useDefaultBack=true 显示返回按钮', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(const TNavBar(title: Text('测试'), useDefaultBack: true)),
+      );
+      expect(find.byIcon(TIcons.chevron_left), findsOneWidget);
+    });
+
+    testWidgets('onBack 回调触发', (tester) async {
+      var backCalled = false;
+      await tester.pumpWidget(
+        wrapWithTheme(
+          TNavBar(
+            title: const Text('测试'),
+            useDefaultBack: true,
+            onBack: () => backCalled = true,
+          ),
+        ),
+      );
+      await tester.tap(find.byIcon(TIcons.chevron_left));
+      await tester.pump();
+      expect(backCalled, isTrue);
+    });
+
+    testWidgets('actions 渲染右侧操作项', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          TNavBar(
+            title: const Text('测试'),
+            useDefaultBack: false,
+            actions: [TNavBarItem(icon: TIcons.ellipsis, onTap: () {})],
+          ),
+        ),
+      );
+      expect(find.byIcon(TIcons.ellipsis), findsOneWidget);
+    });
+
+    testWidgets('leading 渲染左侧操作项', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          TNavBar(
+            title: const Text('测试'),
+            useDefaultBack: false,
+            leading: [TNavBarItem(icon: TIcons.chevron_left, onTap: () {})],
+          ),
+        ),
+      );
+      expect(find.byIcon(TIcons.chevron_left), findsOneWidget);
+    });
+  });
+
+  group('TNavBar A 类禁用', () {
+    testWidgets('onTap: null 时操作项不响应点击', (tester) async {
+      var tapCount = 0;
+      await tester.pumpWidget(
+        wrapWithTheme(
+          TNavBar(
+            title: const Text('测试'),
+            useDefaultBack: false,
+            actions: [
+              TNavBarItem(icon: TIcons.ellipsis, onTap: () => tapCount++),
+            ],
+          ),
+        ),
+      );
+      await tester.tap(find.byIcon(TIcons.ellipsis));
+      await tester.pump();
+      expect(tapCount, 1);
+
+      // onTap: null 表示禁用
+      await tester.pumpWidget(
+        wrapWithTheme(
+          const TNavBar(
+            title: Text('测试'),
+            useDefaultBack: false,
+            actions: [TNavBarItem(icon: TIcons.ellipsis, onTap: null)],
+          ),
+        ),
+      );
+      await tester.tap(find.byIcon(TIcons.ellipsis));
+      await tester.pump();
+      // tapCount 不应增加
+      expect(tapCount, 1);
+    });
+  });
+
+  group('TNavBar Theme 覆盖', () {
+    testWidgets('TNavBarThemeData 覆盖标题颜色', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          const TNavBar(title: Text('主题测试')),
+          navBarTheme: const TNavBarThemeData(titleColor: Colors.red),
+        ),
+      );
+      final style = effectiveTextStyle(tester, '主题测试');
+      expect(style.color, Colors.red);
+    });
+
+    testWidgets('标题自身 TextStyle 优先于 Theme 默认颜色', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          const TNavBar(
+            title: Text('优先级测试', style: TextStyle(color: Colors.blue)),
+          ),
+          navBarTheme: const TNavBarThemeData(titleColor: Colors.red),
+        ),
+      );
+      final style = effectiveTextStyle(tester, '优先级测试');
+      // 内容 Widget 的显式颜色优先于 NavBar Theme 默认色。
+      expect(style.color, Colors.blue);
+    });
+
+    testWidgets('TNavBarThemeData 覆盖背景颜色', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          const TNavBar(title: Text('背景测试')),
+          navBarTheme: const TNavBarThemeData(backgroundColor: Colors.green),
+        ),
+      );
+      // 验证不抛异常即通过
+      expect(find.byType(TNavBar), findsOneWidget);
+    });
+
+    testWidgets('TNavBar 高度通过构造器设置', (tester) async {
+      const navBar = TNavBar(title: Text('高度测试'), height: 64);
+      await tester.pumpWidget(wrapWithTheme(navBar));
+      expect(navBar.preferredSize.height, 64);
+      expect(find.byType(TNavBar), findsOneWidget);
+    });
+  });
+
+  group('TNavBar preferredSize', () {
+    testWidgets('默认高度 48', (tester) async {
+      const navBar = TNavBar(title: Text('尺寸测试'));
+      expect(navBar.preferredSize.height, 48);
+    });
+
+    testWidgets('自定义高度', (tester) async {
+      const navBar = TNavBar(title: Text('尺寸测试'), height: 56);
+      expect(navBar.preferredSize.height, 56);
+    });
+  });
+
+  group('TNavBar 边框模式', () {
+    testWidgets('useBorderStyle 渲染边框容器', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          TNavBar(
+            title: const Text('边框测试'),
+            useDefaultBack: false,
+            actions: [
+              TNavBarItem(icon: TIcons.ellipsis, onTap: () {}),
+              TNavBarItem(icon: TIcons.setting, onTap: () {}),
+            ],
+            useBorderStyle: true,
+          ),
+        ),
+      );
+      expect(find.byType(TNavBar), findsOneWidget);
+    });
+  });
+
+  group('TNavBar belowTitleWidget', () {
+    testWidgets('渲染 belowTitleWidget', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          const TNavBar(
+            title: Text('下方组件测试'),
+            useDefaultBack: false,
+            belowTitleWidget: Text('下方内容'),
+          ),
+        ),
+      );
+      expect(find.text('下方内容'), findsOneWidget);
+    });
+  });
+}

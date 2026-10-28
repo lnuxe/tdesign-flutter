@@ -1,0 +1,32 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
+
+void main() {
+  test('TInputThemeData copyWith and lerp', () {
+    const base = TInputThemeData(
+      clearIconSize: 16,
+      hintStyle: TextStyle(color: Colors.red),
+      clearIconColor: Colors.red,
+    );
+    const other = TInputThemeData(
+      clearIconSize: 24,
+      hintStyle: TextStyle(color: Colors.blue),
+      clearIconColor: Colors.blue,
+    );
+
+    expect(
+      base
+          .copyWith(
+            clearIconSize: 20,
+            hintStyle: const TextStyle(color: Colors.green),
+            clearIconColor: Colors.green,
+          )
+          .clearIconSize,
+      20,
+    );
+    expect(base.lerp(null, 0.5), same(base));
+    expect(base.lerp(other, 0.5).clearIconSize, 20);
+    expect(base.lerp(other, 0.5).hintStyle?.color, isNotNull);
+    expect(base.lerp(other, 0.5).clearIconColor, isNotNull);
+  });
+}

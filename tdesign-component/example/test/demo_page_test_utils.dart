@@ -1,0 +1,399 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:provider/provider.dart';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
+import 'package:tdesign_flutter_example/base/example_base.dart';
+import 'package:tdesign_flutter_example/provider/theme_mode_provider.dart';
+
+const _pageWidth = 375.0;
+const _initialPageHeight = 812.0;
+const _maxPageHeight = 12000.0;
+const _goldenCjkFontFamily = 'TDesign Golden CJK';
+const _feedbackGoldenCjkFontFamily = 'TDesign Feedback Golden CJK';
+const _alignmentCjkFontFamily = 'TDesign Alignment CJK';
+
+// A test file can register several DemoPageTestSpec values that share the
+// same fonts. FontLoader only needs to load a family once; keeping the Future
+// also prevents overlapping registrations on Flutter 3.32 Linux.
+final _goldenFontLoads = <String, Future<void>>{};
+
+class DemoPageTestSpec {
+  const DemoPageTestSpec({
+    required this.name,
+    required this.title,
+    required this.page,
+    required this.expectedTexts,
+    this.componentType,
+    this.expectedComponentCount,
+    this.useFeedbackGoldenFont = false,
+    this.useAlignmentCjkFont = false,
+    this.supplementalCjkFontFamily,
+    this.supplementalCjkFontPath,
+    this.goldenTTextFontFamily,
+    this.precacheAssetImages = const [],
+    this.goldenAtPhoneViewport = false,
+    this.phoneViewportHeight = _initialPageHeight,
+    this.goldenDirectory,
+  }) : assert(
+         (supplementalCjkFontFamily == null) ==
+             (supplementalCjkFontPath == null),
+       );
+
+  final String name;
+  final String title;
+  final Widget page;
+  final List<String> expectedTexts;
+  final Type? componentType;
+  final int? expectedComponentCount;
+  final bool useFeedbackGoldenFont;
+  final bool useAlignmentCjkFont;
+  final String? supplementalCjkFontFamily;
+  final String? supplementalCjkFontPath;
+  final String? goldenTTextFontFamily;
+  final List<String> precacheAssetImages;
+  final bool goldenAtPhoneViewport;
+  final double phoneViewportHeight;
+  final String? goldenDirectory;
+}
+
+void registerDemoPageTests(DemoPageTestSpec spec) {
+  registerDemoStructureTests(spec);
+  registerDemoGoldenTests(spec);
+}
+
+void registerDemoStructureTests(DemoPageTestSpec spec) {
+  setUpAll(() => loadDemoGoldenFonts(spec));
+
+  testWidgets('${spec.name} Demo structure', (tester) async {
+    await pumpFullDemoPage(tester, spec, ThemeMode.light);
+
+    for (final text in spec.expectedTexts) {
+      expect(
+        find.text(text),
+        findsAtLeastNWidgets(1),
+        reason: '${spec.name}: $text',
+      );
+    }
+    if (spec.componentType case final componentType?) {
+      final count = spec.expectedComponentCount;
+      expect(
+        find.byType(componentType),
+        count == null ? findsAtLeastNWidgets(1) : findsNWidgets(count),
+      );
+    }
+    expect(tester.takeException(), isNull);
+    await disposeDemoPage(tester);
+  }, tags: 'demo');
+}
+
+void registerDemoGoldenTests(DemoPageTestSpec spec) {
+  setUpAll(() => loadDemoGoldenFonts(spec));
+
+  for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+    testWidgets('${spec.name} ${mode.name} Demo golden', (tester) async {
+      if (spec.goldenAtPhoneViewport) {
+        await pumpDemoPageAtPhoneViewport(tester, spec, mode);
+      } else {
+        await pumpFullDemoPage(tester, spec, mode);
+      }
+
+      await expectLater(
+        find.byKey(ValueKey('${spec.name}-demo-page')),
+        matchesGoldenFile(
+          _demoGoldenFile(spec, '${spec.name}_page_${mode.name}.png'),
+        ),
+      );
+      await disposeDemoPage(tester);
+    }, tags: 'golden');
+  }
+}
+
+Uri _demoGoldenFile(DemoPageTestSpec spec, String fileName) {
+  final directory = spec.goldenDirectory ?? spec.name;
+  return Uri.file(
+    '${Directory.current.path}/test/$directory/goldens/$fileName',
+  );
+}
+
+Future<void> disposeDemoPage(WidgetTester tester) async {
+  await tester.pumpWidget(const SizedBox());
+  await tester.pump(const Duration(seconds: 1));
+}
+
+Future<void> loadDemoGoldenFonts(DemoPageTestSpec spec) async {
+  final flutterBin = File(
+    Platform.resolvedExecutable,
+  ).parent.parent.parent.parent.parent;
+  final loaders = <Future<void>>[
+    _loadGoldenFont(
+      'packages/tdesign_flutter_icons/TIcons',
+      () => rootBundle.load('packages/tdesign_flutter_icons/fonts/t.ttf'),
+    ),
+    _loadGoldenFont(
+      'packages/cupertino_icons/CupertinoIcons',
+      () =>
+          rootBundle.load('packages/cupertino_icons/assets/CupertinoIcons.ttf'),
+    ),
+    _loadGoldenFont(
+      'Roboto',
+      () => File(
+        '${flutterBin.path}/cache/artifacts/material_fonts/Roboto-Regular.ttf',
+      ).readAsBytes().then(ByteData.sublistView),
+    ),
+    _loadGoldenFont(
+      'MaterialIcons',
+      () => File(
+        '${flutterBin.path}/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+      ).readAsBytes().then(ByteData.sublistView),
+    ),
+    _loadGoldenFont(
+      'packages/tdesign_flutter/TCloudNumber',
+      () => rootBundle.load(
+        'packages/tdesign_flutter/assets/tdesign/TCloudNumberVF.ttf',
+      ),
+    ),
+    _loadGoldenFont(
+      _goldenCjkFontFamily,
+      () => File(
+        'test/fonts/TDesignGoldenCJK-Regular.otf',
+      ).readAsBytes().then(ByteData.sublistView),
+    ),
+  ];
+  if (spec.useFeedbackGoldenFont) {
+    loaders.add(
+      _loadGoldenFont(
+        _feedbackGoldenCjkFontFamily,
+        () => File(
+          'test/fonts/TDesignFeedbackGoldenCJK-Regular.otf',
+        ).readAsBytes().then(ByteData.sublistView),
+      ),
+    );
+  }
+  if (spec.useAlignmentCjkFont) {
+    loaders.add(
+      _loadGoldenFont(
+        _alignmentCjkFontFamily,
+        () => File(
+          'test/fonts/TDesignAlignmentCJK-Regular.otf',
+        ).readAsBytes().then(ByteData.sublistView),
+      ),
+    );
+  }
+  if (spec.supplementalCjkFontFamily case final family?) {
+    loaders.add(
+      _loadGoldenFont(
+        family,
+        () => File(
+          spec.supplementalCjkFontPath!,
+        ).readAsBytes().then(ByteData.sublistView),
+      ),
+    );
+  }
+  await Future.wait(loaders);
+}
+
+Future<void> _loadGoldenFont(String family, Future<ByteData> Function() bytes) {
+  return _goldenFontLoads.putIfAbsent(
+    family,
+    () => (FontLoader(family)..addFont(bytes())).load(),
+  );
+}
+
+Future<void> pumpFullDemoPage(
+  WidgetTester tester,
+  DemoPageTestSpec spec,
+  ThemeMode mode,
+) async {
+  // 调整视口时保留页面与 model，避免丢失 ExamplePage 初始化的代码分组。
+  final page = _buildPage(spec, mode);
+  tester.view.physicalSize = const Size(_pageWidth, _initialPageHeight);
+  tester.view.devicePixelRatio = 1;
+  await tester.pumpWidget(page);
+  await tester.pump();
+  if (spec.precacheAssetImages.isNotEmpty) {
+    final context = tester.element(find.byType(MaterialApp));
+    await tester.runAsync(() async {
+      for (final assetName in spec.precacheAssetImages) {
+        await precacheImage(AssetImage(assetName), context);
+      }
+    });
+    await tester.pump();
+  }
+
+  final scrollables = find.byType(CustomScrollView);
+  if (scrollables.evaluate().isNotEmpty) {
+    final scrollable = find.descendant(
+      of: scrollables.first,
+      matching: find.byType(Scrollable),
+    );
+    final position = tester.state<ScrollableState>(scrollable.first).position;
+
+    // SliverList.builder 在首屏只布局可见子项，此时 maxScrollExtent
+    // 只是估算值。直接用该值扩大视口会把估算误差变成 Golden
+    // 底部的空白区。先在固定手机视口下逐步走到真实末尾，
+    // 让所有 sliver 完成布局，再用最终 extent 计算全页高度。
+    for (var attempt = 0; attempt < 40; attempt++) {
+      final target = position.maxScrollExtent;
+      if (target <= position.pixels + 0.01) {
+        break;
+      }
+      position.jumpTo(target);
+      await tester.pump();
+    }
+
+    final height = (_initialPageHeight + position.maxScrollExtent).clamp(
+      _initialPageHeight,
+      _maxPageHeight,
+    );
+    tester.view.physicalSize = Size(_pageWidth, height);
+    await tester.pump();
+    if (position.hasPixels) {
+      position.jumpTo(0);
+      await tester.pump();
+    }
+  }
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+}
+
+Future<void> pumpDemoPageAtPhoneViewport(
+  WidgetTester tester,
+  DemoPageTestSpec spec,
+  ThemeMode mode, {
+  double? height,
+}) async {
+  tester.view.physicalSize = Size(
+    _pageWidth,
+    height ?? spec.phoneViewportHeight,
+  );
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+
+  await tester.pumpWidget(_buildPage(spec, mode));
+  await tester.pump();
+}
+
+Widget _buildPage(DemoPageTestSpec spec, ThemeMode mode) {
+  final model = ExamplePageModel(
+    text: spec.title,
+    name: spec.name,
+    pageBuilder: (_, __) => spec.page,
+  );
+  return ChangeNotifierProvider(
+    create: (_) => ThemeModeProvider(),
+    child: MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: withDemoGoldenFonts(
+        TThemeBuilder.light(TThemeData.defaultData()),
+        spec,
+      ),
+      darkTheme: withDemoGoldenFonts(
+        TThemeBuilder.dark(TThemeData.defaultData()),
+        spec,
+      ),
+      themeMode: mode,
+      home: RepaintBoundary(
+        key: ValueKey('${spec.name}-demo-page'),
+        child: ExamplePageInheritedTheme(model: model, child: spec.page),
+      ),
+    ),
+  );
+}
+
+ThemeData withDemoGoldenFonts(ThemeData theme, DemoPageTestSpec spec) {
+  final fallback = [
+    if (spec.useFeedbackGoldenFont) _feedbackGoldenCjkFontFamily,
+    _goldenCjkFontFamily,
+    if (spec.useAlignmentCjkFont) _alignmentCjkFontFamily,
+    if (spec.supplementalCjkFontFamily case final family?) family,
+  ];
+  final token = theme.extension<TThemeData>() ?? TThemeData.defaultData();
+  final goldenToken = token.copyWith(
+    name: '${token.name}-golden',
+    fontFamilyMap: {
+      'fontFamily': FontFamily(
+        // Linux Golden 中 Roboto 用于英文/数字，CJK 字体用于中文。
+        // 这只修正测试字形，不改变产品的全局字体 Token。
+        fontFamily: token.fontFamily?.flutterFontFamily ?? 'Roboto',
+        package: token.fontFamily?.package,
+        fallback: {...fallback, ...?token.fontFamily?.fallback}.toList(),
+      ),
+    },
+  );
+  final withFonts = theme
+      .mergeExtension(goldenToken)
+      .copyWith(
+        textTheme: theme.textTheme.apply(fontFamilyFallback: fallback),
+        primaryTextTheme: theme.primaryTextTheme.apply(
+          fontFamilyFallback: fallback,
+        ),
+        // Golden 字体只用于稳定跨平台字形，不能把全局 labelSmall 的 12/20
+        // 误当成 TBadge 的显式尺寸覆盖；Badge 仍应保留自己的 10/16 Token。
+        badgeTheme: theme.badgeTheme.copyWith(
+          textStyle: theme.badgeTheme.textStyle?.copyWith(
+            fontFamilyFallback: fallback,
+          ),
+        ),
+      );
+  if (spec.goldenTTextFontFamily case final family?) {
+    // Keep this font override in the Golden theme, not in the public Demo.
+    // TTextThemeData supplies only the font fields; TabBar still owns its
+    // normal/selected typography and colors.
+    return withFonts.mergeExtension(
+      TTextThemeData(
+        textStyle: TextStyle(fontFamily: family, fontFamilyFallback: fallback),
+      ),
+    );
+  }
+  if (spec.name != 'dialog') {
+    return withFonts;
+  }
+  return withFonts.mergeExtension(
+    TDialogThemeData(
+      titleTextStyle: TextStyle(
+        fontFamily: _feedbackGoldenCjkFontFamily,
+        color: token.textColorPrimary,
+        fontSize: token.fontTitleLarge?.size ?? 18,
+        height: token.fontTitleLarge?.height ?? 26 / 18,
+        fontWeight: token.fontTitleLarge?.fontWeight ?? FontWeight.w600,
+      ),
+      contentTextStyle: TextStyle(
+        fontFamily: _feedbackGoldenCjkFontFamily,
+        color: token.textColorSecondary,
+        fontSize: token.fontBodyLarge?.size ?? 16,
+        height: token.fontBodyLarge?.height ?? 24 / 16,
+        fontWeight: token.fontBodyLarge?.fontWeight ?? FontWeight.w400,
+      ),
+    ),
+  );
+}
+
+Future<void> preloadDemoCodeGroup(String group) async {
+  final manifest =
+      jsonDecode(await rootBundle.loadString('assets/code/manifest.json'))
+          as Map<String, dynamic>;
+  final groups = manifest['groups'] as Map<String, dynamic>;
+  for (final module in groups[group] as List<dynamic>) {
+    await Future.wait([
+      for (final item in module['items'] as List<dynamic>)
+        rootBundle.loadString('assets/code/${item['assetKey']}.txt'),
+    ]);
+  }
+}
+
+Future<void> waitForDemoWidget(WidgetTester tester, Finder finder) async {
+  for (var attempt = 0; attempt < 100; attempt++) {
+    await tester.pumpAndSettle();
+    if (finder.evaluate().isNotEmpty) {
+      return;
+    }
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    });
+  }
+  expect(finder, findsWidgets);
+}

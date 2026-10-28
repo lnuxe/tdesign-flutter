@@ -1,0 +1,843 @@
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show OverflowBoxFit;
+import 'package:image_picker/image_picker.dart';
+import 'package:tdesign_flutter_icons/tdesign_flutter_icons.dart' show TIcons;
+
+import '../../theme/basic.dart';
+import '../../theme/resource_delegate.dart';
+import '../../theme/t_colors.dart';
+import '../../theme/t_fonts.dart';
+import '../../theme/t_internal_material.dart';
+import '../../theme/t_radius.dart';
+import '../../theme/t_spacers.dart';
+import '../../theme/t_theme.dart';
+import '../button/t_button.dart';
+import '../button/t_button_types.dart';
+import '../text/t_text_styled.dart';
+import 't_upload_theme_data.dart';
+import 't_upload_types.dart';
+
+export 't_upload_types.dart';
+
+class TUpload extends StatelessWidget {
+  const TUpload({
+    super.key,
+    required this.files,
+    this.onChanged,
+    this.mediaType = TUploadMediaType.image,
+    this.layout = TUploadLayout.grid,
+    this.draggable = false,
+    this.maxFiles = 1,
+    this.maxFileSize,
+    this.picker,
+    this.onFileTap,
+    this.onValidationError,
+    this.onError,
+  }) : assert(maxFiles == null || maxFiles > 0),
+       assert(maxFiles == null || files.length <= maxFiles),
+       assert(mediaType == TUploadMediaType.image || maxFiles == 1);
+
+  /// 受控文件列表。
+  /// 长度不能超过 maxFiles；各文件 id 应唯一。组件不执行网络上传，由业务更新上传状态。
+  final List<TUploadFile> files;
+
+  /// 文件列表变化回调；为 null 时禁用。
+  /// 为 null 只阻止新的交互，不取消已经开始的选择。
+  /// 异步选择完成后优先使用当前回调；当前回调为空时使用选择开始时的回调。
+  /// 组件卸载后不再通知。
+  final ValueChanged<List<TUploadFile>>? onChanged;
+
+  /// 允许选择的媒体类型。
+  final TUploadMediaType mediaType;
+
+  /// 文件布局方式。
+  final TUploadLayout layout;
+
+  /// 是否支持长按拖拽排序，默认为 false。
+  ///
+  /// 排序完成后通过 [onChanged] 返回新的不可变文件列表；当 [onChanged]
+  /// 为 null 时组件禁用，不会开始拖拽。
+  final bool draggable;
+
+  /// 最大文件数量；null 表示不限制。
+  /// 非 null 时必须大于 0；video 模式必须设为 1，包括使用自定义 picker 时。
+  final int? maxFiles;
+
+  /// 单个文件最大字节数；null 表示不限制。
+  /// 自定义 picker 返回的文件未提供 size 时跳过大小校验，调用方需自行保证大小限制。
+  final int? maxFileSize;
+
+  /// 自定义文件选择器；为空时使用 image_picker。
+  ///
+  /// 同一组件选择期间忽略重复点击。选择完成后按最新的受控文件列表与
+  /// 数量、大小限制校验并合并；禁用不取消在途选择，组件卸载后不再通知。
+  final TUploadPicker? picker;
+
+  /// 点击任意状态的已有文件时触发。
+  ///
+  /// 组件不会自动预览或重新上传；调用方应根据 [TUploadFile.status]
+  /// 决定后续行为。组件禁用时不会触发。
+  final ValueChanged<TUploadFile>? onFileTap;
+
+  /// 文件校验失败时触发。
+  /// 新增批次超出数量或大小限制时整批拒绝，不触发 onChanged。
+  /// 异步选择完成后优先使用当前回调；当前回调为空时使用选择开始时的回调。
+  final ValueChanged<TUploadValidationError>? onValidationError;
+
+  /// 文件选择器抛出异常时触发，包括读取所选文件失败。
+  ///
+  /// 不表示网络上传失败；组件不执行网络上传。业务回调（包括
+  /// [onChanged]、[onValidationError]）抛出的异常不会被捕获或转发到此回调。
+  /// 在途选择不受临时禁用影响；发生异常时优先使用当前回调，
+  /// 当前回调为空时使用选择开始时的回调。组件卸载后不再通知。
+  final ValueChanged<Object>? onError;
+
+  @override
+  Widget build(BuildContext context) => _TUploadView(configuration: this);
+}
+
+class _TUploadView extends StatefulWidget {
+  const _TUploadView({required this.configuration});
+
+  final TUpload configuration;
+
+  @override
+  State<_TUploadView> createState() => _TUploadState();
+}
+
+class _TUploadState extends State<_TUploadView> {
+  bool _picking = false;
+
+  List<TUploadFile> get files => widget.configuration.files;
+  ValueChanged<List<TUploadFile>>? get onChanged =>
+      widget.configuration.onChanged;
+  TUploadMediaType get mediaType => widget.configuration.mediaType;
+  TUploadLayout get layout => widget.configuration.layout;
+  bool get draggable => widget.configuration.draggable;
+  int? get maxFiles => widget.configuration.maxFiles;
+  int? get maxFileSize => widget.configuration.maxFileSize;
+  TUploadPicker? get picker => widget.configuration.picker;
+  ValueChanged<TUploadFile>? get onFileTap => widget.configuration.onFileTap;
+  ValueChanged<TUploadValidationError>? get onValidationError =>
+      widget.configuration.onValidationError;
+  ValueChanged<Object>? get onError => widget.configuration.onError;
+
+  bool get _canPick => _enabled && _canAdd && !_picking;
+
+  bool get _enabled => onChanged != null;
+
+  bool get _canAdd => maxFiles == null || files.length < maxFiles!;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context).extension<TUploadThemeData>();
+    final size = theme?.itemSize ?? _defaultItemSize(context, theme);
+    final content = layout == TUploadLayout.grid
+        ? _buildGrid(context, size, theme)
+        : _buildList(context, theme);
+    return Semantics(enabled: _enabled, child: content);
+  }
+
+  double _defaultItemSize(BuildContext context, TUploadThemeData? theme) {
+    var result = 80.0;
+    for (final file in files) {
+      if (file.bytes == null && file.url == null) {
+        final line = TTextStyled(
+          file.name,
+          maxLines: 1,
+          style: _fontStyle(
+            context.tTheme.fontBodySmall,
+            context.tTheme.textColorSecondary,
+          ),
+        ).naturalSize(context).height;
+        result = math.max(result, line + 24 + 4 + context.tTheme.spacer * 2);
+      }
+      if (file.status != TUploadFileStatus.ready &&
+          file.status != TUploadFileStatus.success) {
+        final line = TTextStyled(
+          _statusLabel(context, file),
+          maxLines: 1,
+          style: _statusTextStyle(context, theme),
+        ).naturalSize(context).height;
+        result = math.max(result, line + (theme?.statusIconSize ?? 24) + 4);
+      }
+    }
+    return result;
+  }
+
+  TextStyle _statusTextStyle(BuildContext context, TUploadThemeData? theme) =>
+      TextStyle(
+        color: context.tTheme.textColorAnti,
+        fontSize: context.tTheme.fontBodySmall?.size ?? 12,
+        height: context.tTheme.fontBodySmall?.height,
+      ).merge(theme?.statusTextStyle);
+
+  String _statusLabel(BuildContext context, TUploadFile file) {
+    final resource = TResourceManager.instance.delegate(context);
+    return file.status == TUploadFileStatus.uploading
+        ? file.progress == null
+              ? resource.uploading
+              : '${(file.progress! * 100).round()}%'
+        : file.errorText ??
+              (file.status == TUploadFileStatus.retryableError
+                  ? resource.uploadRetry
+                  : resource.uploadFailed);
+  }
+
+  Widget _buildGrid(
+    BuildContext context,
+    double size,
+    TUploadThemeData? theme,
+  ) {
+    return SizedBox(
+      width: double.infinity,
+      child: Wrap(
+        spacing: theme?.spacing ?? context.tTheme.spacer,
+        runSpacing: theme?.runSpacing ?? context.tTheme.spacer,
+        alignment: theme?.alignment ?? WrapAlignment.start,
+        children: [
+          for (var index = 0; index < files.length; index++)
+            _buildDraggableFile(
+              context,
+              index: index,
+              feedbackWidth: size,
+              child: _buildFile(context, files[index], size, theme),
+            ),
+          if (_canAdd) _buildAdd(context, size, theme),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildList(BuildContext context, TUploadThemeData? theme) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final children = <Widget>[
+          if (_canAdd) _buildListAdd(context),
+          for (var index = 0; index < files.length; index++)
+            _buildDraggableFile(
+              context,
+              index: index,
+              feedbackWidth: constraints.hasBoundedWidth
+                  ? constraints.maxWidth
+                  : MediaQuery.sizeOf(context).width,
+              child: _buildListFile(context, files[index], theme),
+            ),
+        ];
+        return Column(
+          children: [
+            for (var index = 0; index < children.length; index++) ...[
+              if (index > 0) SizedBox(height: context.tTheme.spacer1),
+              children[index],
+            ],
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildDraggableFile(
+    BuildContext context, {
+    required int index,
+    required double feedbackWidth,
+    required Widget child,
+  }) {
+    if (!_enabled || !draggable) {
+      return child;
+    }
+    return DragTarget<int>(
+      key: ValueKey('upload-drop-${files[index].id}'),
+      onWillAcceptWithDetails: (details) => details.data != index,
+      onAcceptWithDetails: (details) => _reorder(details.data, index),
+      builder: (context, candidates, rejected) => LongPressDraggable<int>(
+        key: ValueKey('upload-drag-${files[index].id}'),
+        data: index,
+        feedback: TInternalMaterial(
+          color: Colors.transparent,
+          child: SizedBox(width: feedbackWidth, child: child),
+        ),
+        childWhenDragging: Opacity(opacity: 0.32, child: child),
+        child: child,
+      ),
+    );
+  }
+
+  void _reorder(int oldIndex, int newIndex) {
+    if (!_enabled || !draggable || oldIndex == newIndex) {
+      return;
+    }
+    final reordered = [...files];
+    final file = reordered.removeAt(oldIndex);
+    reordered.insert(newIndex, file);
+    onChanged!(List.unmodifiable(reordered));
+  }
+
+  Widget _buildAdd(BuildContext context, double size, TUploadThemeData? theme) {
+    final resource = TResourceManager.instance.delegate(context);
+    final backgroundColor = _canPick
+        ? (theme?.backgroundColor ?? context.tTheme.bgColorSecondaryContainer)
+        : (theme?.disabledBackgroundColor ??
+              context.tTheme.bgColorComponentDisabled);
+    final foregroundColor = _canPick
+        ? (theme?.foregroundColor ?? context.tTheme.textColorPlaceholder)
+        : (theme?.disabledForegroundColor ?? context.tTheme.textColorDisabled);
+    return Semantics(
+      button: true,
+      enabled: _canPick,
+      label: resource.uploadSelect,
+      child: GestureDetector(
+        key: const ValueKey('upload-add'),
+        onTap: _canPick ? _pickFiles : null,
+        child: Container(
+          width: size,
+          height: size,
+          decoration: _decoration(context, backgroundColor, theme),
+          alignment: Alignment.center,
+          child: TInternalIcon(
+            TIcons.add,
+            size: theme?.addIconSize ?? 28,
+            color: foregroundColor,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFile(
+    BuildContext context,
+    TUploadFile file,
+    double size,
+    TUploadThemeData? theme,
+  ) {
+    return SizedBox.square(
+      dimension: size,
+      child: ClipRRect(
+        borderRadius: _borderRadius(context, theme),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            GestureDetector(
+              key: ValueKey('upload-file-${file.id}'),
+              onTap: _enabled && onFileTap != null
+                  ? () => onFileTap!(file)
+                  : null,
+              child: _preview(context, file, theme),
+            ),
+            if (file.status != TUploadFileStatus.ready &&
+                file.status != TUploadFileStatus.success)
+              _statusOverlay(context, file, theme),
+            if (!_enabled &&
+                (file.status == TUploadFileStatus.ready ||
+                    file.status == TUploadFileStatus.success) &&
+                (file.bytes != null || file.url != null))
+              Positioned.fill(
+                child: ColoredBox(color: _disabledMaskColor(context, theme)),
+              ),
+            if (_enabled && file.canRemove)
+              Positioned(
+                right: 0,
+                top: 0,
+                child: GestureDetector(
+                  key: ValueKey('upload-remove-${file.id}'),
+                  onTap: () => onChanged!(
+                    List.unmodifiable(
+                      files.where((item) => item.id != file.id),
+                    ),
+                  ),
+                  child: Container(
+                    width: theme?.removeButtonSize ?? 20,
+                    height: theme?.removeButtonSize ?? 20,
+                    decoration: BoxDecoration(
+                      color:
+                          theme?.removeButtonColor ??
+                          context.tTheme.textColorDisabled,
+                      borderRadius: BorderRadius.only(
+                        topRight: Radius.circular(
+                          _borderRadius(context, theme).topRight.x,
+                        ),
+                        bottomLeft: Radius.circular(
+                          _borderRadius(context, theme).bottomLeft.x,
+                        ),
+                      ),
+                    ),
+                    child: TInternalIcon(
+                      TIcons.close,
+                      size: theme?.removeIconSize ?? 16,
+                      color: context.tTheme.textColorAnti,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _preview(
+    BuildContext context,
+    TUploadFile file,
+    TUploadThemeData? theme,
+  ) {
+    if (file.bytes != null) {
+      return Image.memory(file.bytes!, fit: BoxFit.cover);
+    }
+    if (file.url != null) {
+      return Image.network(
+        file.url!,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => _placeholder(context, theme),
+      );
+    }
+    return _filePreview(context, file, theme);
+  }
+
+  Widget _filePreview(
+    BuildContext context,
+    TUploadFile file,
+    TUploadThemeData? theme,
+  ) {
+    return ColoredBox(
+      color: theme?.backgroundColor ?? context.tTheme.bgColorSecondaryContainer,
+      child: Padding(
+        padding: EdgeInsets.symmetric(
+          vertical: context.tTheme.spacer,
+          horizontal: 4.0,
+        ),
+        child: OverflowBox(
+          fit: OverflowBoxFit.deferToChild,
+          minHeight: 0,
+          maxHeight: double.infinity,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              TInternalIcon(
+                _fileIcon(file.name),
+                size: 24,
+                color: _fileIconColor(context, file.name),
+              ),
+              const SizedBox(height: 4.0),
+              TTextStyled(
+                file.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: _fontStyle(
+                  context.tTheme.fontBodySmall,
+                  _enabled
+                      ? context.tTheme.textColorSecondary
+                      : context.tTheme.textColorDisabled,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _placeholder(BuildContext context, TUploadThemeData? theme) {
+    return ColoredBox(
+      color: theme?.backgroundColor ?? context.tTheme.bgColorSecondaryContainer,
+      child: TInternalIcon(
+        TIcons.file,
+        color: theme?.foregroundColor ?? context.tTheme.textColorPlaceholder,
+      ),
+    );
+  }
+
+  Color _disabledMaskColor(BuildContext context, TUploadThemeData? theme) {
+    return theme?.disabledMaskColor ??
+        (Theme.of(context).brightness == Brightness.light
+            ? context.tTheme.textColorAnti.withValues(alpha: 0.6)
+            : context.tTheme.fontGray1.withValues(alpha: 0.6));
+  }
+
+  Widget _statusOverlay(
+    BuildContext context,
+    TUploadFile file,
+    TUploadThemeData? theme,
+  ) {
+    final isUploading = file.status == TUploadFileStatus.uploading;
+    final isRetryableError = file.status == TUploadFileStatus.retryableError;
+    final label = _statusLabel(context, file);
+    final foregroundColor = context.tTheme.textColorAnti;
+    return GestureDetector(
+      key: ValueKey('upload-status-${file.id}'),
+      onTap: _enabled && onFileTap != null ? () => onFileTap!(file) : null,
+      child: ColoredBox(
+        color: theme?.overlayColor ?? context.tTheme.fontGray3,
+        child: OverflowBox(
+          fit: OverflowBoxFit.deferToChild,
+          minHeight: 0,
+          maxHeight: double.infinity,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (isUploading)
+                SizedBox.square(
+                  dimension: theme?.statusIconSize ?? 24,
+                  child: TInternalCircularProgressIndicator(
+                    value: file.progress,
+                    strokeWidth: 2,
+                    color: foregroundColor,
+                  ),
+                )
+              else
+                TInternalIcon(
+                  isRetryableError ? TIcons.refresh : TIcons.close_circle,
+                  size: theme?.statusIconSize ?? 24,
+                  color: foregroundColor,
+                ),
+              const SizedBox(height: 4),
+              TTextStyled(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: _statusTextStyle(context, theme),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildListAdd(BuildContext context) {
+    return TButton(
+      key: const ValueKey('upload-add'),
+      size: TButtonSize.medium,
+      colorPreset: TButtonColorPreset.primary,
+      icon: const TInternalIcon(TIcons.upload),
+      onPressed: _canPick ? _pickFiles : null,
+      child: Text(
+        'Upload',
+        selectionColor: context.tTheme.brandColor.withValues(alpha: 0.4),
+      ),
+    );
+  }
+
+  Widget _buildListFile(
+    BuildContext context,
+    TUploadFile file,
+    TUploadThemeData? theme,
+  ) {
+    return _listRow(
+      context,
+      leading: _listLeading(context, file, theme),
+      title: file.name,
+      subtitle: _listSubtitle(context, file),
+      onTap: _enabled && onFileTap != null ? () => onFileTap!(file) : null,
+      key: ValueKey('upload-list-file-${file.id}'),
+      isFailure:
+          file.status == TUploadFileStatus.error ||
+          file.status == TUploadFileStatus.retryableError,
+      trailing: _enabled && file.canRemove
+          ? GestureDetector(
+              key: ValueKey('upload-remove-${file.id}'),
+              onTap: () => onChanged!(
+                List.unmodifiable(files.where((item) => item.id != file.id)),
+              ),
+              child: TInternalIcon(
+                TIcons.delete,
+                size: 18,
+                color: context.tTheme.textColorPlaceholder,
+              ),
+            )
+          : null,
+    );
+  }
+
+  Widget _listLeading(
+    BuildContext context,
+    TUploadFile file,
+    TUploadThemeData? theme,
+  ) {
+    if (file.status == TUploadFileStatus.uploading) {
+      return SizedBox.square(
+        dimension: 24,
+        child: TInternalCircularProgressIndicator(
+          value: file.progress,
+          strokeWidth: 2,
+          color: _enabled
+              ? context.tTheme.brandColor
+              : context.tTheme.brandColorDisabled,
+        ),
+      );
+    }
+    if (file.status == TUploadFileStatus.error) {
+      return TInternalIcon(
+        TIcons.error_circle_filled,
+        size: 24,
+        color: _enabled
+            ? context.tTheme.errorColor
+            : context.tTheme.errorColorDisabled,
+      );
+    }
+    if (file.status == TUploadFileStatus.retryableError) {
+      return TInternalIcon(
+        TIcons.refresh,
+        size: 24,
+        color: _enabled
+            ? context.tTheme.errorColor
+            : context.tTheme.errorColorDisabled,
+      );
+    }
+    if (file.bytes != null || file.url != null) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(context.tTheme.radiusSmall),
+        child: SizedBox.square(
+          dimension: 24,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              _preview(context, file, theme),
+              if (!_enabled)
+                ColoredBox(color: _disabledMaskColor(context, theme)),
+            ],
+          ),
+        ),
+      );
+    }
+    return TInternalIcon(
+      _fileIcon(file.name),
+      size: 24,
+      color: _fileIconColor(context, file.name),
+    );
+  }
+
+  String _listSubtitle(BuildContext context, TUploadFile file) {
+    if (file.status == TUploadFileStatus.uploading) {
+      return file.progress == null
+          ? TResourceManager.instance.delegate(context).uploading
+          : '${(file.progress! * 100).round()}%';
+    }
+    if (file.status == TUploadFileStatus.error) {
+      return file.errorText ??
+          TResourceManager.instance.delegate(context).uploadFailed;
+    }
+    if (file.status == TUploadFileStatus.retryableError) {
+      return file.errorText ??
+          TResourceManager.instance.delegate(context).uploadRetry;
+    }
+    if (file.size != null) {
+      return _formatSize(file.size!);
+    }
+    final resource = TResourceManager.instance.delegate(context);
+    return file.status == TUploadFileStatus.success
+        ? resource.uploadSuccess
+        : resource.uploadPending;
+  }
+
+  String _formatSize(int size) {
+    if (size < 1024) {
+      return '$size B';
+    }
+    if (size < 1024 * 1024) {
+      return '${(size / 1024).toStringAsFixed(1)} KB';
+    }
+    return '${(size / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  Widget _listRow(
+    BuildContext context, {
+    required Widget leading,
+    required String title,
+    required String subtitle,
+    required Key key,
+    VoidCallback? onTap,
+    Widget? trailing,
+    bool isFailure = false,
+  }) {
+    final token = context.tTheme;
+    final titleColor = !_enabled
+        ? token.textColorDisabled
+        : isFailure
+        ? token.errorColor
+        : token.textColorPrimary;
+    final subtitleColor = _enabled
+        ? token.textColorPlaceholder
+        : token.textColorDisabled;
+    return GestureDetector(
+      key: key,
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          color: token.bgColorSecondaryContainer,
+          borderRadius: BorderRadius.circular(token.radiusDefault),
+        ),
+        padding: EdgeInsets.symmetric(
+          vertical: token.spacer,
+          horizontal: token.spacer1,
+        ),
+        child: Row(
+          children: [
+            SizedBox.square(dimension: 24, child: Center(child: leading)),
+            SizedBox(width: token.spacer1),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TTextStyled(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: _fontStyle(token.fontBodyMedium, titleColor),
+                  ),
+                  const SizedBox(height: 4.0),
+                  TTextStyled(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: _fontStyle(token.fontBodySmall, subtitleColor),
+                  ),
+                ],
+              ),
+            ),
+            if (trailing != null) ...[SizedBox(width: token.spacer1), trailing],
+          ],
+        ),
+      ),
+    );
+  }
+
+  IconData _fileIcon(String name) {
+    final extension = name.split('.').last.toLowerCase();
+    return switch (extension) {
+      'pdf' => TIcons.file_pdf,
+      'xls' || 'xlsx' || 'csv' => TIcons.file_excel,
+      'doc' || 'docx' => TIcons.file_word,
+      'ppt' || 'pptx' => TIcons.file_powerpoint,
+      _ => TIcons.file,
+    };
+  }
+
+  Color _fileIconColor(BuildContext context, String name) {
+    final extension = name.split('.').last.toLowerCase();
+    final token = context.tTheme;
+    if (!_enabled) {
+      return switch (extension) {
+        'pdf' || 'mp4' || 'mov' => token.errorColorDisabled,
+        'xls' || 'xlsx' || 'csv' => token.successColorDisabled,
+        'doc' || 'docx' => token.brandColorDisabled,
+        'ppt' || 'pptx' => token.warningColorDisabled,
+        _ => token.textColorDisabled,
+      };
+    }
+    return switch (extension) {
+      'pdf' || 'mp4' || 'mov' => token.errorColor,
+      'xls' || 'xlsx' || 'csv' => token.successColor,
+      'doc' || 'docx' => token.brandColor,
+      'ppt' || 'pptx' => token.warningColor,
+      _ => token.textColorPrimary,
+    };
+  }
+
+  TextStyle _fontStyle(Font? font, Color color) => TextStyle(
+    color: color,
+    fontSize: font?.size ?? 14,
+    height: font?.height,
+    fontWeight: font?.fontWeight,
+  );
+
+  Future<void> _pickFiles() async {
+    if (!_canPick) {
+      return;
+    }
+    final onChangedAtStart = onChanged!;
+    final onValidationErrorAtStart = onValidationError;
+    final onErrorAtStart = onError;
+    setState(() => _picking = true);
+    try {
+      late final List<TUploadFile> selected;
+      try {
+        selected = await (picker?.call() ?? _pickWithImagePicker());
+      } catch (error) {
+        if (mounted) {
+          (onError ?? onErrorAtStart)?.call(error);
+        }
+        return;
+      }
+      if (!mounted || selected.isEmpty) {
+        return;
+      }
+      final limit = maxFiles;
+      if (limit != null && files.length + selected.length > limit) {
+        (onValidationError ?? onValidationErrorAtStart)?.call(
+          TUploadValidationError.maxFiles,
+        );
+        return;
+      }
+      if (maxFileSize != null &&
+          selected.any(
+            (file) => file.size != null && file.size! > maxFileSize!,
+          )) {
+        (onValidationError ?? onValidationErrorAtStart)?.call(
+          TUploadValidationError.fileSize,
+        );
+        return;
+      }
+      (onChanged ?? onChangedAtStart)(
+        List.unmodifiable([...files, ...selected]),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _picking = false);
+      }
+    }
+  }
+
+  Future<List<TUploadFile>> _pickWithImagePicker() async {
+    final imagePicker = ImagePicker();
+    final picked = <XFile>[];
+    if (mediaType == TUploadMediaType.video) {
+      final file = await imagePicker.pickVideo(source: ImageSource.gallery);
+      if (file != null) {
+        picked.add(file);
+      }
+    } else if (maxFiles == 1) {
+      final file = await imagePicker.pickImage(source: ImageSource.gallery);
+      if (file != null) {
+        picked.add(file);
+      }
+    } else {
+      picked.addAll(await imagePicker.pickMultiImage());
+    }
+    return Future.wait(
+      picked.map((file) async {
+        final bytes = await file.readAsBytes();
+        return TUploadFile(
+          id: '${DateTime.now().microsecondsSinceEpoch}-${file.name}',
+          name: file.name,
+          bytes: bytes,
+          size: bytes.length,
+        );
+      }),
+    );
+  }
+
+  BoxDecoration _decoration(
+    BuildContext context,
+    Color color,
+    TUploadThemeData? theme,
+  ) {
+    if (theme?.variant == TUploadVariant.circle) {
+      return BoxDecoration(color: color, shape: BoxShape.circle);
+    }
+    return BoxDecoration(
+      color: color,
+      borderRadius: _borderRadius(context, theme),
+    );
+  }
+
+  BorderRadius _borderRadius(BuildContext context, TUploadThemeData? theme) {
+    final radius = theme?.borderRadius ?? context.tTheme.radiusDefault;
+    return theme?.variant == TUploadVariant.circle
+        ? BorderRadius.circular(999)
+        : BorderRadius.circular(radius);
+  }
+}

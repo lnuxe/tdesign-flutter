@@ -1,0 +1,1477 @@
+import 'dart:async';
+import 'dart:typed_data';
+
+import 'package:flutter/gestures.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
+
+void main() {
+  final bytes = Uint8List.fromList(const [
+    0x89,
+    0x50,
+    0x4e,
+    0x47,
+    0x0d,
+    0x0a,
+    0x1a,
+    0x0a,
+    0x00,
+    0x00,
+    0x00,
+    0x0d,
+    0x49,
+    0x48,
+    0x44,
+    0x52,
+    0x00,
+    0x00,
+    0x00,
+    0x01,
+    0x00,
+    0x00,
+    0x00,
+    0x01,
+    0x08,
+    0x06,
+    0x00,
+    0x00,
+    0x00,
+    0x1f,
+    0x15,
+    0xc4,
+    0x89,
+    0x00,
+    0x00,
+    0x00,
+    0x0d,
+    0x49,
+    0x44,
+    0x41,
+    0x54,
+    0x08,
+    0xd7,
+    0x63,
+    0xf8,
+    0xcf,
+    0xc0,
+    0xf0,
+    0x1f,
+    0x00,
+    0x05,
+    0x00,
+    0x01,
+    0xff,
+    0x89,
+    0x99,
+    0x3d,
+    0x1d,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x49,
+    0x45,
+    0x4e,
+    0x44,
+    0xae,
+    0x42,
+    0x60,
+    0x82,
+  ]);
+
+  TUploadFile file(
+    String id, {
+    TUploadFileStatus status = TUploadFileStatus.ready,
+    double? progress,
+    String? errorText,
+    bool canRemove = true,
+    int? size,
+    bool withBytes = true,
+  }) {
+    return TUploadFile(
+      id: id,
+      name: '$id.png',
+      bytes: withBytes ? bytes : null,
+      size: size ?? bytes.length,
+      status: status,
+      progress: progress,
+      errorText: errorText,
+      canRemove: canRemove,
+    );
+  }
+
+  Widget wrap(Widget child, {TUploadThemeData? uploadTheme}) {
+    var theme = TThemeBuilder.light(TThemeData.defaultData());
+    if (uploadTheme != null) {
+      theme = theme.mergeExtension(uploadTheme);
+    }
+    return MaterialApp(
+      theme: theme,
+      home: Scaffold(body: child),
+    );
+  }
+
+  group('TUpload controlled behavior', () {
+    testWidgets('onChanged null disables add and file actions', (tester) async {
+      await tester.pumpWidget(
+        wrap(
+          TUpload(
+            files: [file('a')],
+            maxFiles: 2,
+            draggable: true,
+            onFileTap: (_) => fail('disabled file tap'),
+          ),
+        ),
+      );
+      expect(
+        tester
+            .widget<GestureDetector>(find.byKey(const ValueKey('upload-add')))
+            .onTap,
+        isNull,
+      );
+      expect(
+        tester
+            .widget<GestureDetector>(
+              find.byKey(const ValueKey('upload-file-a')),
+            )
+            .onTap,
+        isNull,
+      );
+      expect(find.byKey(const ValueKey('upload-remove-a')), findsNothing);
+      expect(find.byType(LongPressDraggable<int>), findsNothing);
+    });
+
+    testWidgets('grid long press reorder emits an immutable next list', (
+      tester,
+    ) async {
+      List<TUploadFile>? changed;
+      final first = file('a');
+      final second = file('b');
+      final third = file('c');
+      await tester.pumpWidget(
+        wrap(
+          TUpload(
+            files: [first, second, third],
+            maxFiles: 3,
+            draggable: true,
+            onChanged: (value) => changed = value,
+          ),
+        ),
+      );
+
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byKey(const ValueKey('upload-file-a'))),
+      );
+      await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
+      await gesture.moveTo(
+        tester.getCenter(find.byKey(const ValueKey('upload-file-c'))),
+      );
+      await tester.pump();
+      await gesture.up();
+      await tester.pump();
+
+      expect(changed, [second, third, first]);
+      expect(() => changed!.add(file('d')), throwsUnsupportedError);
+    });
+
+    testWidgets('list long press reorder uses onChanged', (tester) async {
+      List<TUploadFile>? changed;
+      final first = file('a');
+      final second = file('b');
+      await tester.pumpWidget(
+        wrap(
+          TUpload(
+            layout: TUploadLayout.list,
+            files: [first, second],
+            maxFiles: 2,
+            draggable: true,
+            onChanged: (value) => changed = value,
+          ),
+        ),
+      );
+
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byKey(const ValueKey('upload-list-file-b'))),
+      );
+      await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
+      await gesture.moveTo(
+        tester.getCenter(find.byKey(const ValueKey('upload-list-file-a'))),
+      );
+      await tester.pump();
+      await gesture.up();
+      await tester.pump();
+
+      expect(changed, [second, first]);
+    });
+
+    testWidgets('draggable false does not install reorder gestures', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        wrap(
+          TUpload(
+            files: [file('a'), file('b')],
+            maxFiles: 2,
+            onChanged: (_) {},
+          ),
+        ),
+      );
+
+      expect(find.byType(LongPressDraggable<int>), findsNothing);
+      expect(find.byType(DragTarget<int>), findsNothing);
+    });
+
+    testWidgets('picker merges into latest parent files', (tester) async {
+      final pending = Completer<List<TUploadFile>>();
+      var files = <TUploadFile>[const TUploadFile(id: 'old', name: 'old')];
+      late StateSetter rebuild;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: StatefulBuilder(
+              builder: (context, setState) {
+                rebuild = setState;
+                return TUpload(
+                  maxFiles: 5,
+                  files: files,
+                  picker: () => pending.future,
+                  onChanged: (next) => rebuild(() => files = next),
+                );
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.byKey(const ValueKey('upload-add')));
+      rebuild(() => files = [const TUploadFile(id: 'new', name: 'new')]);
+      await tester.pump();
+      pending.complete([const TUploadFile(id: 'picked', name: 'picked')]);
+      await tester.pump();
+      expect(files.map((file) => file.id), ['new', 'picked']);
+      expect(
+        () => files.add(const TUploadFile(id: 'extra', name: 'extra')),
+        throwsUnsupportedError,
+      );
+    });
+
+    testWidgets(
+      'picker ignores reentry and allows next request after completion',
+      (tester) async {
+        final pending = [
+          Completer<List<TUploadFile>>(),
+          Completer<List<TUploadFile>>(),
+        ];
+        var requests = 0;
+        var files = <TUploadFile>[];
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: StatefulBuilder(
+                builder: (context, setState) {
+                  return TUpload(
+                    maxFiles: 5,
+                    files: files,
+                    picker: () => pending[requests++].future,
+                    onChanged: (next) => setState(() => files = next),
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.byKey(const ValueKey('upload-add')));
+        await tester.tap(find.byKey(const ValueKey('upload-add')));
+        expect(requests, 1);
+        pending.first.complete([const TUploadFile(id: 'first', name: 'first')]);
+        await tester.pump();
+        await tester.tap(find.byKey(const ValueKey('upload-add')));
+        expect(requests, 2);
+        pending.last.complete([
+          const TUploadFile(id: 'second', name: 'second'),
+        ]);
+        await tester.pump();
+        expect(files.map((file) => file.id), ['first', 'second']);
+      },
+    );
+
+    testWidgets('picker delivers completion after onChanged is removed', (
+      tester,
+    ) async {
+      final pending = Completer<List<TUploadFile>>();
+      var enabled = true;
+      var changes = 0;
+      late StateSetter rebuild;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: StatefulBuilder(
+              builder: (context, setState) {
+                rebuild = setState;
+                return TUpload(
+                  files: const [],
+                  picker: () => pending.future,
+                  onChanged: enabled ? (_) => changes++ : null,
+                );
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.byKey(const ValueKey('upload-add')));
+      rebuild(() => enabled = false);
+      await tester.pump();
+      pending.complete([const TUploadFile(id: 'picked', name: 'picked')]);
+      await tester.pump();
+      expect(changes, 1);
+    });
+
+    for (final reenabled in [false, true]) {
+      for (final outcome in ['result', 'quantity', 'size', 'error']) {
+        testWidgets(
+          'pending $outcome is delivered after disabling${reenabled ? " and re-enabling" : ""}',
+          (tester) async {
+            final pending = Completer<List<TUploadFile>>();
+            final pickerError = StateError('picker failed');
+            var enabled = true;
+            var updated = false;
+            var requests = 0;
+            late StateSetter rebuild;
+            final calls = <String>[];
+            List<TUploadFile>? changed;
+            TUploadValidationError? validation;
+            Object? error;
+            await tester.pumpWidget(
+              wrap(
+                StatefulBuilder(
+                  builder: (context, setState) {
+                    rebuild = setState;
+                    final source = updated ? 'current' : 'initial';
+                    return TUpload(
+                      files: [file(updated ? 'new' : 'old')],
+                      maxFiles: updated && outcome == 'quantity' ? 2 : 5,
+                      maxFileSize: updated && outcome == 'size' ? 1 : 100,
+                      picker: () {
+                        requests++;
+                        return pending.future;
+                      },
+                      onChanged: enabled
+                          ? (next) {
+                              calls.add('$source:result');
+                              changed = next;
+                            }
+                          : null,
+                      onValidationError: enabled
+                          ? (value) {
+                              calls.add('$source:validation');
+                              validation = value;
+                            }
+                          : null,
+                      onError: enabled
+                          ? (value) {
+                              calls.add('$source:error');
+                              error = value;
+                            }
+                          : null,
+                    );
+                  },
+                ),
+              ),
+            );
+            await tester.tap(find.byKey(const ValueKey('upload-add')));
+            rebuild(() {
+              enabled = false;
+              updated = true;
+            });
+            await tester.pump();
+            await tester.tap(find.byKey(const ValueKey('upload-add')));
+            expect(requests, 1);
+            if (reenabled) {
+              rebuild(() => enabled = true);
+              await tester.pump();
+              await tester.tap(find.byKey(const ValueKey('upload-add')));
+              expect(requests, 1);
+            }
+            if (outcome == 'error') {
+              pending.completeError(pickerError);
+            } else {
+              pending.complete([
+                file('picked', size: 2),
+                if (outcome == 'quantity') file('second', size: 2),
+              ]);
+            }
+            await tester.pump();
+            final source = reenabled ? 'current' : 'initial';
+            if (outcome == 'result') {
+              expect(calls, ['$source:result']);
+              expect(changed!.map((value) => value.id), ['new', 'picked']);
+              expect(() => changed!.add(file('extra')), throwsUnsupportedError);
+            } else if (outcome == 'error') {
+              expect(calls, ['$source:error']);
+              expect(error, same(pickerError));
+              expect(changed, isNull);
+            } else {
+              expect(calls, ['$source:validation']);
+              expect(
+                validation,
+                outcome == 'quantity'
+                    ? TUploadValidationError.maxFiles
+                    : TUploadValidationError.fileSize,
+              );
+              expect(changed, isNull);
+            }
+          },
+        );
+      }
+    }
+
+    for (final quantityLimit in [true, false]) {
+      testWidgets(
+        'picker validates latest ${quantityLimit ? 'quantity' : 'size'} limit',
+        (tester) async {
+          final pending = Completer<List<TUploadFile>>();
+          var tightened = false;
+          var changes = 0;
+          final errors = <TUploadValidationError>[];
+          late StateSetter rebuild;
+          await tester.pumpWidget(
+            wrap(
+              StatefulBuilder(
+                builder: (context, setState) {
+                  rebuild = setState;
+                  return TUpload(
+                    files: const [],
+                    maxFiles: quantityLimit && tightened ? 1 : 5,
+                    maxFileSize: !quantityLimit && tightened ? 1 : 100,
+                    picker: () => pending.future,
+                    onChanged: (_) => changes++,
+                    onValidationError: errors.add,
+                  );
+                },
+              ),
+            ),
+          );
+          await tester.tap(find.byKey(const ValueKey('upload-add')));
+          rebuild(() => tightened = true);
+          await tester.pump();
+          pending.complete([
+            file('a', size: 2),
+            if (quantityLimit) file('b', size: 2),
+          ]);
+          await tester.pump();
+          expect(changes, 0);
+          expect(errors, [
+            quantityLimit
+                ? TUploadValidationError.maxFiles
+                : TUploadValidationError.fileSize,
+          ]);
+        },
+      );
+    }
+
+    for (final failPicker in [false, true]) {
+      testWidgets(
+        'unmounted picker discards ${failPicker ? 'error' : 'result'}',
+        (tester) async {
+          final pending = Completer<List<TUploadFile>>();
+          var callbacks = 0;
+          await tester.pumpWidget(
+            wrap(
+              TUpload(
+                files: const [],
+                picker: () => pending.future,
+                onChanged: (_) => callbacks++,
+                onError: (_) => callbacks++,
+              ),
+            ),
+          );
+          await tester.tap(find.byKey(const ValueKey('upload-add')));
+          await tester.pumpWidget(wrap(const SizedBox()));
+          if (failPicker) {
+            pending.completeError(StateError('picker failed'));
+          } else {
+            pending.complete([file('a')]);
+          }
+          await tester.pump();
+          expect(callbacks, 0);
+          expect(tester.takeException(), isNull);
+        },
+      );
+      testWidgets(
+        'picker can retry after ${failPicker ? 'error' : 'cancellation'}',
+        (tester) async {
+          final pending = Completer<List<TUploadFile>>();
+          var requests = 0;
+          List<TUploadFile>? changed;
+          Object? error;
+          await tester.pumpWidget(
+            wrap(
+              TUpload(
+                files: const [],
+                picker: () => requests++ == 0
+                    ? pending.future
+                    : Future.value([file('a')]),
+                onChanged: (value) => changed = value,
+                onError: (value) => error = value,
+              ),
+            ),
+          );
+          await tester.tap(find.byKey(const ValueKey('upload-add')));
+          if (failPicker) {
+            pending.completeError(StateError('picker failed'));
+          } else {
+            pending.complete([]);
+          }
+          await tester.pump();
+          expect(changed, isNull);
+          expect(error, failPicker ? isA<StateError>() : isNull);
+          await tester.tap(find.byKey(const ValueKey('upload-add')));
+          await tester.pump();
+          expect(requests, 2);
+          expect(changed!.map((value) => value.id), ['a']);
+        },
+      );
+    }
+
+    testWidgets('picker uses current callback and layout after rebuild', (
+      tester,
+    ) async {
+      final pending = Completer<List<TUploadFile>>();
+      var updated = false;
+      final calls = <String>[];
+      late StateSetter rebuild;
+      await tester.pumpWidget(
+        wrap(
+          StatefulBuilder(
+            builder: (context, setState) {
+              rebuild = setState;
+              return TUpload(
+                files: const [],
+                picker: () => pending.future,
+                layout: updated ? TUploadLayout.list : TUploadLayout.grid,
+                onChanged: updated
+                    ? (_) => calls.add('current')
+                    : (_) => calls.add('old'),
+              );
+            },
+          ),
+        ),
+      );
+      await tester.tap(find.byKey(const ValueKey('upload-add')));
+      rebuild(() => updated = true);
+      await tester.pump();
+      pending.complete([file('a')]);
+      await tester.pump();
+      expect(calls, ['current']);
+    });
+
+    testWidgets('custom picker emits a complete immutable next list', (
+      tester,
+    ) async {
+      List<TUploadFile>? changed;
+      final initial = file('a');
+      final selected = file('b');
+      await tester.pumpWidget(
+        wrap(
+          TUpload(
+            files: [initial],
+            maxFiles: 3,
+            picker: () async => [selected],
+            onChanged: (files) => changed = files,
+          ),
+        ),
+      );
+      await tester.tap(find.byKey(const ValueKey('upload-add')));
+      await tester.pump();
+      expect(changed, [initial, selected]);
+      expect(() => changed!.add(file('c')), throwsUnsupportedError);
+    });
+
+    testWidgets('empty selection does not emit changes', (tester) async {
+      var changed = false;
+      await tester.pumpWidget(
+        wrap(
+          TUpload(
+            files: const [],
+            picker: () async => [],
+            onChanged: (_) => changed = true,
+          ),
+        ),
+      );
+      await tester.tap(find.byKey(const ValueKey('upload-add')));
+      await tester.pump();
+      expect(changed, isFalse);
+    });
+
+    testWidgets('empty add uses distinct enabled and disabled token styles', (
+      tester,
+    ) async {
+      final token = TThemeData.defaultData();
+
+      await tester.pumpWidget(wrap(TUpload(files: const [])));
+      final disabledAdd = find.byKey(const ValueKey('upload-add'));
+      final disabledContainer = tester.widget<Container>(
+        find.descendant(of: disabledAdd, matching: find.byType(Container)),
+      );
+      final disabledIcon = tester.widget<Icon>(
+        find.descendant(of: disabledAdd, matching: find.byType(Icon)),
+      );
+
+      await tester.pumpWidget(
+        wrap(
+          TUpload(
+            files: const [],
+            picker: () async => const [],
+            onChanged: (_) {},
+          ),
+        ),
+      );
+      final enabledAdd = find.byKey(const ValueKey('upload-add'));
+      final enabledContainer = tester.widget<Container>(
+        find.descendant(of: enabledAdd, matching: find.byType(Container)),
+      );
+      final enabledIcon = tester.widget<Icon>(
+        find.descendant(of: enabledAdd, matching: find.byType(Icon)),
+      );
+
+      expect(
+        (disabledContainer.decoration! as BoxDecoration).color,
+        token.bgColorComponentDisabled,
+      );
+      expect(disabledIcon.color, token.textColorDisabled);
+      expect((disabledContainer.decoration! as BoxDecoration).border, isNull);
+      expect(
+        (enabledContainer.decoration! as BoxDecoration).color,
+        token.bgColorSecondaryContainer,
+      );
+      expect(enabledIcon.color, token.textColorPlaceholder);
+      expect((enabledContainer.decoration! as BoxDecoration).border, isNull);
+      expect(disabledIcon.color, isNot(enabledIcon.color));
+      expect(
+        (disabledContainer.decoration! as BoxDecoration).color,
+        isNot((enabledContainer.decoration! as BoxDecoration).color),
+      );
+    });
+
+    testWidgets('validates maximum count and byte size', (tester) async {
+      TUploadValidationError? error;
+      await tester.pumpWidget(
+        wrap(
+          TUpload(
+            files: [file('a')],
+            maxFiles: 2,
+            picker: () async => [file('b'), file('c')],
+            onValidationError: (value) => error = value,
+            onChanged: (_) {},
+          ),
+        ),
+      );
+      await tester.tap(find.byKey(const ValueKey('upload-add')));
+      await tester.pump();
+      expect(error, TUploadValidationError.maxFiles);
+
+      error = null;
+      await tester.pumpWidget(
+        wrap(
+          TUpload(
+            files: const [],
+            maxFileSize: 10,
+            picker: () async => [file('large', size: 11)],
+            onValidationError: (value) => error = value,
+            onChanged: (_) {},
+          ),
+        ),
+      );
+      await tester.tap(find.byKey(const ValueKey('upload-add')));
+      await tester.pump();
+      expect(error, TUploadValidationError.fileSize);
+    });
+
+    testWidgets('picker errors are forwarded', (tester) async {
+      Object? error;
+      await tester.pumpWidget(
+        wrap(
+          TUpload(
+            files: const [],
+            picker: () async => throw StateError('failed'),
+            onError: (value) => error = value,
+            onChanged: (_) {},
+          ),
+        ),
+      );
+      await tester.tap(find.byKey(const ValueKey('upload-add')));
+      await tester.pump();
+      expect(error, isA<StateError>());
+    });
+
+    for (final callback in ['onChanged', 'maxFiles', 'fileSize']) {
+      testWidgets('$callback errors propagate without picker onError', (
+        tester,
+      ) async {
+        final businessError = StateError('business callback failed');
+        final propagated = <Object>[];
+        Object? pickerError;
+        await tester.pumpWidget(
+          wrap(
+            TUpload(
+              layout: TUploadLayout.list,
+              files: const [],
+              maxFiles: callback == 'maxFiles' ? 1 : null,
+              maxFileSize: callback == 'fileSize' ? 10 : null,
+              picker: () async => callback == 'maxFiles'
+                  ? [file('first'), file('second')]
+                  : [file('picked', size: 11)],
+              onChanged: (_) {
+                if (callback == 'onChanged') {
+                  throw businessError;
+                }
+              },
+              onValidationError: (_) => throw businessError,
+              onError: (value) => pickerError = value,
+            ),
+          ),
+        );
+        final add = tester.widget<TButton>(
+          find.byKey(const ValueKey('upload-add')),
+        );
+        runZonedGuarded(
+          add.onPressed!,
+          (error, stack) => propagated.add(error),
+        );
+        await tester.pump();
+        expect(pickerError, isNull);
+        expect(propagated, hasLength(1));
+        expect(propagated.single, same(businessError));
+      });
+    }
+
+    testWidgets('remove emits the remaining files', (tester) async {
+      List<TUploadFile>? changed;
+      final first = file('a');
+      final second = file('b');
+      await tester.pumpWidget(
+        wrap(
+          TUpload(
+            files: [first, second],
+            maxFiles: 3,
+            onChanged: (value) => changed = value,
+          ),
+        ),
+      );
+      await tester.tap(find.byKey(const ValueKey('upload-remove-a')));
+      expect(changed, [second]);
+    });
+
+    testWidgets('file tap reports every status through one callback', (
+      tester,
+    ) async {
+      final tapped = <TUploadFile>[];
+      final ready = file('ready');
+      final uploading = file('uploading', status: TUploadFileStatus.uploading);
+      final failed = file(
+        'failed',
+        status: TUploadFileStatus.error,
+        errorText: 'Try again',
+      );
+      final retry = file('retry', status: TUploadFileStatus.retryableError);
+      await tester.pumpWidget(
+        wrap(
+          TUpload(
+            files: [ready, uploading, failed, retry],
+            maxFiles: 4,
+            onFileTap: tapped.add,
+            onChanged: (_) {},
+          ),
+        ),
+      );
+      await tester.tap(find.byKey(const ValueKey('upload-file-ready')));
+      await tester.tap(find.byKey(const ValueKey('upload-status-uploading')));
+      await tester.tap(find.byKey(const ValueKey('upload-status-failed')));
+      await tester.tap(find.byKey(const ValueKey('upload-status-retry')));
+      expect(tapped, [ready, uploading, failed, retry]);
+    });
+
+    testWidgets('max count hides add and canRemove controls remove action', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        wrap(TUpload(files: [file('a', canRemove: false)], onChanged: (_) {})),
+      );
+      expect(find.byKey(const ValueKey('upload-add')), findsNothing);
+      expect(find.byKey(const ValueKey('upload-remove-a')), findsNothing);
+    });
+  });
+
+  group('TUpload status and theme', () {
+    testWidgets('renders uploading progress, indeterminate and error states', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        wrap(
+          TUpload(
+            files: [
+              file(
+                'progress',
+                status: TUploadFileStatus.uploading,
+                progress: 0.5,
+              ),
+              file('loading', status: TUploadFileStatus.uploading),
+              file('error', status: TUploadFileStatus.error),
+              file('success', status: TUploadFileStatus.success),
+            ],
+            maxFiles: 5,
+            onChanged: (_) {},
+          ),
+        ),
+      );
+      expect(find.text('50%'), findsOneWidget);
+      expect(find.text('上传中'), findsOneWidget);
+      expect(find.text('上传失败'), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsNWidgets(2));
+      expect(find.byKey(const ValueKey('upload-status-success')), findsNothing);
+    });
+
+    testWidgets('status overlay and remove icon use token foreground styles', (
+      tester,
+    ) async {
+      final token = TThemeData.defaultData();
+      await tester.pumpWidget(
+        wrap(
+          TUpload(
+            files: [
+              file(
+                'progress',
+                status: TUploadFileStatus.uploading,
+                progress: 0.5,
+              ),
+              file('error', status: TUploadFileStatus.error),
+            ],
+            maxFiles: 3,
+            onChanged: (_) {},
+          ),
+        ),
+      );
+
+      final indicator = tester.widget<CircularProgressIndicator>(
+        find.byType(CircularProgressIndicator).first,
+      );
+      final errorIcon = tester.widget<Icon>(find.byIcon(TIcons.close_circle));
+      final removeIcon = tester.widget<Icon>(
+        find.descendant(
+          of: find.byKey(const ValueKey('upload-remove-error')),
+          matching: find.byType(Icon),
+        ),
+      );
+      final statusText = tester.widget<Text>(find.text('上传失败'));
+      final statusOverlay = tester.widget<ColoredBox>(
+        find.descendant(
+          of: find.byKey(const ValueKey('upload-status-error')),
+          matching: find.byType(ColoredBox),
+        ),
+      );
+      final statusClip = tester.widget<ClipRRect>(
+        find
+            .ancestor(
+              of: find.byKey(const ValueKey('upload-status-error')),
+              matching: find.byType(ClipRRect),
+            )
+            .first,
+      );
+
+      expect(indicator.color, token.textColorAnti);
+      expect(errorIcon.color, token.textColorAnti);
+      expect(removeIcon.color, token.textColorAnti);
+      expect(statusText.maxLines, 1);
+      expect(statusText.overflow, TextOverflow.ellipsis);
+      expect(statusText.style?.color, token.textColorAnti);
+      expect(statusText.style?.fontSize, token.fontBodySmall?.size);
+      expect(statusText.style?.height, token.fontBodySmall?.height);
+      expect(statusOverlay.color, token.fontGray3);
+      expect(
+        statusClip.borderRadius,
+        BorderRadius.circular(token.radiusDefault),
+      );
+    });
+
+    testWidgets('renders list layout with file metadata and actions', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        wrap(
+          TUpload(
+            layout: TUploadLayout.list,
+            files: [
+              file('image'),
+              file('retry', status: TUploadFileStatus.retryableError),
+            ],
+            maxFiles: 3,
+            onChanged: (_) {},
+          ),
+        ),
+      );
+
+      expect(
+        find.byKey(const ValueKey('upload-list-file-image')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('upload-list-file-retry')),
+        findsOneWidget,
+      );
+      expect(find.text('image.png'), findsOneWidget);
+      expect(find.text('重新上传'), findsOneWidget);
+      expect(find.byIcon(TIcons.refresh), findsOneWidget);
+      expect(find.byIcon(TIcons.delete), findsNWidgets(2));
+
+      final token = TThemeData.defaultData();
+      expect(
+        tester.getTopLeft(find.byKey(const ValueKey('upload-add'))).dy,
+        lessThan(
+          tester
+              .getTopLeft(find.byKey(const ValueKey('upload-list-file-image')))
+              .dy,
+        ),
+      );
+      final retryRow = tester.widget<GestureDetector>(
+        find.byKey(const ValueKey('upload-list-file-retry')),
+      );
+      final container = retryRow.child! as Container;
+      final decoration = container.decoration! as BoxDecoration;
+      expect(
+        container.padding,
+        EdgeInsets.symmetric(vertical: token.spacer, horizontal: token.spacer1),
+      );
+      expect(decoration.color, token.bgColorSecondaryContainer);
+      expect(
+        decoration.borderRadius,
+        BorderRadius.circular(token.radiusDefault),
+      );
+      expect(tester.widget<Icon>(find.byIcon(TIcons.refresh)).size, 24);
+      expect(
+        tester.widgetList<Icon>(find.byIcon(TIcons.delete)).first.size,
+        18,
+      );
+      expect(
+        tester.widget<Text>(find.text('retry.png')).style?.color,
+        token.errorColor,
+      );
+    });
+
+    testWidgets('list reports every file status through one callback', (
+      tester,
+    ) async {
+      final tapped = <TUploadFile>[];
+      final ready = file('ready');
+      final error = file('error', status: TUploadFileStatus.error);
+      final uploading = file('uploading', status: TUploadFileStatus.uploading);
+      final retry = file('retry', status: TUploadFileStatus.retryableError);
+      await tester.pumpWidget(
+        wrap(
+          TUpload(
+            layout: TUploadLayout.list,
+            files: [ready, error, uploading, retry],
+            maxFiles: 5,
+            onChanged: (_) {},
+            onFileTap: tapped.add,
+          ),
+        ),
+      );
+
+      for (final id in ['ready', 'error', 'uploading', 'retry']) {
+        tester
+            .widget<GestureDetector>(
+              find.byKey(ValueKey('upload-list-file-$id')),
+            )
+            .onTap!();
+      }
+      expect(tapped, [ready, error, uploading, retry]);
+    });
+
+    testWidgets('retryable error visual does not depend on callback', (
+      tester,
+    ) async {
+      final retryableError = file(
+        'retryable',
+        status: TUploadFileStatus.retryableError,
+        errorText: null,
+      );
+      await tester.pumpWidget(
+        wrap(TUpload(files: [retryableError], onChanged: (_) {})),
+      );
+
+      expect(find.text('重新上传'), findsOneWidget);
+      expect(find.byIcon(TIcons.refresh), findsOneWidget);
+      expect(
+        tester
+            .widget<GestureDetector>(
+              find.byKey(const ValueKey('upload-status-retryable')),
+            )
+            .onTap,
+        isNull,
+      );
+
+      await tester.pumpWidget(
+        wrap(
+          TUpload(
+            layout: TUploadLayout.list,
+            files: [retryableError],
+            onChanged: (_) {},
+          ),
+        ),
+      );
+      expect(find.text('重新上传'), findsOneWidget);
+      expect(find.byIcon(TIcons.refresh), findsOneWidget);
+      expect(
+        tester
+            .widget<GestureDetector>(
+              find.byKey(const ValueKey('upload-list-file-retryable')),
+            )
+            .onTap,
+        isNull,
+      );
+    });
+
+    testWidgets('list add uses the expected button content and semantics', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      await tester.pumpWidget(
+        wrap(
+          TUpload(
+            layout: TUploadLayout.list,
+            mediaType: TUploadMediaType.video,
+            files: const [],
+            onChanged: (_) {},
+          ),
+        ),
+      );
+
+      expect(find.text('Upload'), findsOneWidget);
+      expect(find.byIcon(TIcons.upload), findsOneWidget);
+      expect(
+        tester.getSemantics(find.byKey(const ValueKey('upload-add'))),
+        matchesSemantics(
+          label: 'Upload',
+          isButton: true,
+          hasEnabledState: true,
+          isEnabled: true,
+          isFocusable: true,
+          hasTapAction: true,
+          hasFocusAction: true,
+        ),
+      );
+
+      await tester.pumpWidget(
+        wrap(
+          TUpload(layout: TUploadLayout.list, files: const [], onChanged: null),
+        ),
+      );
+      expect(find.text('Upload'), findsOneWidget);
+      expect(
+        tester.getSemantics(find.byKey(const ValueKey('upload-add'))),
+        matchesSemantics(
+          label: 'Upload',
+          isButton: true,
+          hasEnabledState: true,
+          isFocusable: true,
+          hasFocusAction: true,
+        ),
+      );
+      semantics.dispose();
+    });
+
+    testWidgets('successful list file without size does not show pending', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        wrap(
+          TUpload(
+            layout: TUploadLayout.list,
+            files: const [
+              TUploadFile(id: 'ready-no-size', name: 'ready.png'),
+              TUploadFile(
+                id: 'success-no-size',
+                name: 'success.png',
+                status: TUploadFileStatus.success,
+              ),
+            ],
+            maxFiles: 3,
+            onChanged: (_) {},
+          ),
+        ),
+      );
+
+      expect(find.text('待上传'), findsOneWidget);
+      expect(find.text('上传成功'), findsOneWidget);
+    });
+
+    testWidgets('disabled image files use the disabled mask token', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        wrap(TUpload(files: [file('image')], onChanged: null)),
+      );
+
+      final maskColor = TThemeData.defaultData().textColorAnti.withValues(
+        alpha: 0.6,
+      );
+      final masks = find.byWidgetPredicate(
+        (widget) => widget is ColoredBox && widget.color == maskColor,
+      );
+      expect(masks, findsOneWidget);
+    });
+
+    testWidgets('renders bytes, network and placeholder preview branches', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        wrap(
+          TUpload(
+            files: [
+              file('bytes'),
+              const TUploadFile(id: 'url', name: 'url', url: 'bad://url'),
+              const TUploadFile(id: 'empty', name: 'empty'),
+            ],
+            maxFiles: 4,
+            onChanged: (_) {},
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.byType(Image), findsNWidgets(2));
+      expect(find.byType(ColoredBox), findsWidgets);
+    });
+
+    testWidgets('placeholder preview uses token colors under full theme', (
+      tester,
+    ) async {
+      final token = TThemeData.defaultData();
+      await tester.pumpWidget(
+        wrap(
+          TUpload(
+            files: const [TUploadFile(id: 'empty', name: 'empty')],
+            onChanged: null,
+          ),
+        ),
+      );
+
+      final placeholderBox = tester.widget<ColoredBox>(
+        find
+            .ancestor(
+              of: find.byIcon(TIcons.file),
+              matching: find.byType(ColoredBox),
+            )
+            .first,
+      );
+      final icon = tester.widget<Icon>(find.byIcon(TIcons.file));
+      expect(placeholderBox.color, token.bgColorSecondaryContainer);
+      expect(icon.color, token.textColorDisabled);
+    });
+
+    testWidgets('theme controls dimensions, shape and status styling', (
+      tester,
+    ) async {
+      const statusStyle = TextStyle(color: Colors.yellow, fontSize: 10);
+      await tester.pumpWidget(
+        wrap(
+          TUpload(
+            files: [file('error', status: TUploadFileStatus.error)],
+            maxFiles: 2,
+            onChanged: (_) {},
+          ),
+          uploadTheme: const TUploadThemeData(
+            variant: TUploadVariant.circle,
+            itemSize: 96,
+            spacing: 3,
+            runSpacing: 4,
+            alignment: WrapAlignment.center,
+            backgroundColor: Colors.green,
+            foregroundColor: Colors.red,
+            disabledBackgroundColor: Colors.brown,
+            disabledForegroundColor: Colors.pink,
+            overlayColor: Colors.blue,
+            statusTextStyle: statusStyle,
+            borderRadius: 12,
+            addIconSize: 20,
+            statusIconSize: 18,
+            removeButtonSize: 24,
+            removeButtonColor: Colors.purple,
+            removeIconSize: 12,
+          ),
+        ),
+      );
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is SizedBox && widget.width == 96 && widget.height == 96,
+        ),
+        findsOneWidget,
+      );
+      final renderedStatusStyle = tester.widget<Text>(find.text('上传失败')).style!;
+      expect(renderedStatusStyle.color, statusStyle.color);
+      expect(renderedStatusStyle.fontSize, statusStyle.fontSize);
+      expect(renderedStatusStyle.inherit, isFalse);
+      final statusClip = tester.widget<ClipRRect>(
+        find
+            .ancestor(
+              of: find.byKey(const ValueKey('upload-status-error')),
+              matching: find.byType(ClipRRect),
+            )
+            .first,
+      );
+      expect(statusClip.borderRadius, BorderRadius.circular(999));
+      final add = tester.widget<Container>(
+        find.descendant(
+          of: find.byKey(const ValueKey('upload-add')),
+          matching: find.byType(Container),
+        ),
+      );
+      expect((add.decoration as BoxDecoration).shape, BoxShape.circle);
+
+      await tester.pumpWidget(
+        wrap(
+          TUpload(files: const []),
+          uploadTheme: const TUploadThemeData(
+            disabledBackgroundColor: Colors.brown,
+            disabledForegroundColor: Colors.pink,
+          ),
+        ),
+      );
+      final disabledAdd = tester.widget<Container>(
+        find.descendant(
+          of: find.byKey(const ValueKey('upload-add')),
+          matching: find.byType(Container),
+        ),
+      );
+      final disabledIcon = tester.widget<Icon>(
+        find.descendant(
+          of: find.byKey(const ValueKey('upload-add')),
+          matching: find.byType(Icon),
+        ),
+      );
+      final disabledDecoration = disabledAdd.decoration! as BoxDecoration;
+      expect(disabledDecoration.color, Colors.brown);
+      expect(disabledDecoration.border, isNull);
+      expect(disabledIcon.color, Colors.pink);
+    });
+  });
+
+  group('TUpload data contracts', () {
+    test('file is immutable and copyWith updates selected values', () {
+      final original = file('a');
+      final copied = original.copyWith(
+        id: 'b',
+        name: 'b.png',
+        url: 'https://example.com/b.png',
+        bytes: Uint8List(1),
+        size: 1,
+        status: TUploadFileStatus.uploading,
+        progress: 0.2,
+        errorText: 'error',
+        canRemove: false,
+      );
+      expect(copied.id, 'b');
+      expect(copied.status, TUploadFileStatus.uploading);
+      expect(copied.canRemove, isFalse);
+      expect(original.copyWith().id, 'a');
+      expect(
+        () => TUploadFile(id: 'a', name: 'a', progress: 2),
+        throwsAssertionError,
+      );
+    });
+
+    test('constructor rejects invalid limits and video multi-selection', () {
+      expect(() => TUpload(files: const [], maxFiles: 0), throwsAssertionError);
+      expect(
+        () => TUpload(files: [file('a'), file('b')], maxFiles: 1),
+        throwsAssertionError,
+      );
+      expect(
+        () => TUpload(
+          files: const [],
+          mediaType: TUploadMediaType.video,
+          maxFiles: 2,
+        ),
+        throwsAssertionError,
+      );
+    });
+
+    test('enum contracts are final', () {
+      expect(TUploadMediaType.values, hasLength(2));
+      expect(TUploadFileStatus.values, hasLength(5));
+      expect(TUploadValidationError.values, hasLength(2));
+      expect(TUploadVariant.values, hasLength(2));
+      expect(TUploadLayout.values, hasLength(2));
+    });
+  });
+
+  group('default image_picker adapter', () {
+    late ImagePickerPlatform originalPlatform;
+    late _FakeImagePickerPlatform fakePlatform;
+
+    setUp(() {
+      originalPlatform = ImagePickerPlatform.instance;
+      fakePlatform = _FakeImagePickerPlatform(
+        XFile.fromData(bytes, name: 'selected.png'),
+      );
+      ImagePickerPlatform.instance = fakePlatform;
+    });
+    tearDown(() {
+      ImagePickerPlatform.instance = originalPlatform;
+    });
+
+    testWidgets('covers single image, multiple image and video selection', (
+      tester,
+    ) async {
+      List<TUploadFile>? changed;
+      Object? pickerError;
+
+      Future<void> run(TUpload upload) async {
+        await tester.pumpWidget(wrap(upload));
+        await tester.tap(find.byKey(const ValueKey('upload-add')));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        await tester.pump();
+      }
+
+      await run(
+        TUpload(
+          files: const [],
+          onError: (error) => pickerError = error,
+          onChanged: (value) => changed = value,
+        ),
+      );
+      expect(pickerError, isNull);
+      expect(fakePlatform.imageCalls, 1);
+      expect(changed, hasLength(1));
+
+      changed = null;
+      await run(
+        TUpload(
+          files: const [],
+          maxFiles: null,
+          onChanged: (value) => changed = value,
+        ),
+      );
+      expect(changed, hasLength(1));
+
+      changed = null;
+      await run(
+        TUpload(
+          files: const [],
+          mediaType: TUploadMediaType.video,
+          onChanged: (value) => changed = value,
+        ),
+      );
+      expect(changed, hasLength(1));
+    });
+
+    testWidgets('cancelled default picker keeps controlled value', (
+      tester,
+    ) async {
+      var changed = false;
+      fakePlatform.cancelled = true;
+      await tester.pumpWidget(
+        wrap(TUpload(files: const [], onChanged: (_) => changed = true)),
+      );
+      await tester.tap(find.byKey(const ValueKey('upload-add')));
+      await tester.pumpAndSettle();
+      expect(changed, isFalse);
+    });
+  });
+
+  test('TUploadThemeData copyWith and lerp', () {
+    const base = TUploadThemeData(
+      variant: TUploadVariant.square,
+      itemSize: 80,
+      spacing: 4,
+      runSpacing: 6,
+      alignment: WrapAlignment.start,
+      backgroundColor: Colors.white,
+      foregroundColor: Colors.black,
+      disabledBackgroundColor: Colors.grey,
+      disabledForegroundColor: Colors.blueGrey,
+      overlayColor: Colors.black54,
+      statusTextStyle: TextStyle(fontSize: 10),
+      borderRadius: 4,
+      addIconSize: 20,
+      statusIconSize: 22,
+      removeButtonSize: 18,
+      removeButtonColor: Colors.grey,
+      removeIconSize: 12,
+      disabledMaskColor: Colors.white54,
+    );
+    const other = TUploadThemeData(
+      variant: TUploadVariant.circle,
+      itemSize: 120,
+      spacing: 8,
+      runSpacing: 10,
+      alignment: WrapAlignment.end,
+      backgroundColor: Colors.black,
+      foregroundColor: Colors.white,
+      disabledBackgroundColor: Colors.brown,
+      disabledForegroundColor: Colors.pink,
+      overlayColor: Colors.blue,
+      statusTextStyle: TextStyle(fontSize: 14),
+      borderRadius: 12,
+      addIconSize: 28,
+      statusIconSize: 30,
+      removeButtonSize: 24,
+      removeButtonColor: Colors.red,
+      removeIconSize: 16,
+      disabledMaskColor: Colors.black54,
+    );
+    expect(base.copyWith().itemSize, 80);
+    expect(base.copyWith(itemSize: 90).itemSize, 90);
+    expect(base.copyWith().disabledForegroundColor, Colors.blueGrey);
+    expect(base.copyWith().disabledMaskColor, Colors.white54);
+    expect(
+      base
+          .copyWith(disabledForegroundColor: Colors.green)
+          .disabledForegroundColor,
+      Colors.green,
+    );
+    expect(base.lerp(null, 0.5), same(base));
+    expect(base.lerp(other, 0.25).variant, TUploadVariant.square);
+    expect(base.lerp(other, 0.75).variant, TUploadVariant.circle);
+    expect(base.lerp(other, 0.5).itemSize, 100);
+    expect(
+      base.lerp(other, 0.5).disabledBackgroundColor,
+      Color.lerp(Colors.grey, Colors.brown, 0.5),
+    );
+  });
+}
+
+class _FakeImagePickerPlatform extends ImagePickerPlatform {
+  _FakeImagePickerPlatform(this.file);
+
+  final XFile file;
+  bool cancelled = false;
+  int imageCalls = 0;
+
+  @override
+  Future<XFile?> getImageFromSource({
+    required ImageSource source,
+    ImagePickerOptions options = const ImagePickerOptions(),
+  }) async {
+    imageCalls += 1;
+    return cancelled ? null : file;
+  }
+
+  @override
+  Future<List<XFile>> getMultiImageWithOptions({
+    MultiImagePickerOptions options = const MultiImagePickerOptions(),
+  }) async {
+    return cancelled ? [] : [file];
+  }
+
+  @override
+  Future<XFile?> getVideo({
+    required ImageSource source,
+    CameraDevice preferredCameraDevice = CameraDevice.rear,
+    Duration? maxDuration,
+  }) async {
+    return cancelled ? null : file;
+  }
+}

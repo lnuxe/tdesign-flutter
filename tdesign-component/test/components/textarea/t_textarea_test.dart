@@ -1,0 +1,423 @@
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
+
+void main() {
+  double alphabeticBaseline(WidgetTester tester, Finder finder) {
+    final renderBox = tester.renderObject<RenderBox>(finder);
+    final localBaseline = renderBox.getDryBaseline(
+      renderBox.constraints,
+      TextBaseline.alphabetic,
+    );
+    return tester.getTopLeft(finder).dy + localBaseline!;
+  }
+
+  Widget wrap(Widget child, {TInputThemeData? inputTheme}) {
+    var theme = TThemeBuilder.light(TThemeData.defaultData());
+    if (inputTheme != null) {
+      theme = theme.mergeExtension(inputTheme);
+    }
+    return MaterialApp(
+      theme: theme,
+      home: Scaffold(body: child),
+    );
+  }
+
+  testWidgets('TTextarea delegates every public editing option to TInput', (
+    tester,
+  ) async {
+    final controller = TextEditingController(text: 'initial');
+    final focusNode = FocusNode();
+    await tester.pumpWidget(
+      wrap(
+        TTextarea(
+          controller: controller,
+          label: '标题',
+          enabled: true,
+          readOnly: true,
+          hintText: 'hint',
+          prefix: const Icon(Icons.search),
+          suffix: const Icon(Icons.info),
+          maxLines: 8,
+          minLines: 2,
+          maxLength: 50,
+          autofocus: true,
+          focusNode: focusNode,
+          inputType: TextInputType.multiline,
+          inputAction: TextInputAction.newline,
+          textAlign: TextAlign.center,
+          inputFormatters: [LengthLimitingTextInputFormatter(20)],
+        ),
+      ),
+    );
+
+    final field = tester.widget<TextField>(find.byType(TextField));
+    expect(field.controller, same(controller));
+    expect(field.readOnly, isTrue);
+    expect(field.maxLines, 8);
+    expect(field.minLines, 2);
+    expect(field.maxLength, isNull);
+    expect(
+      field.inputFormatters,
+      contains(isA<LengthLimitingTextInputFormatter>()),
+    );
+    expect(field.autofocus, isTrue);
+    expect(field.focusNode, same(focusNode));
+    expect(field.textInputAction, TextInputAction.newline);
+    expect(field.textAlign, TextAlign.center);
+    expect(find.text('标题'), findsOneWidget);
+
+    controller.dispose();
+    focusNode.dispose();
+  });
+
+  testWidgets('TTextarea forwards submission and editing completion', (
+    tester,
+  ) async {
+    String? submitted;
+    var completed = false;
+    await tester.pumpWidget(
+      wrap(
+        TTextarea(
+          initialValue: 'text',
+          inputAction: TextInputAction.done,
+          onSubmitted: (value) => submitted = value,
+          onEditingComplete: () => completed = true,
+        ),
+      ),
+    );
+    await tester.tap(find.byType(TextField));
+    await tester.pump();
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    expect(submitted, 'text');
+    expect(completed, isTrue);
+  });
+
+  testWidgets('multiline minimum rows are selected by the instance', (
+    tester,
+  ) async {
+    await tester.pumpWidget(wrap(const TTextarea(minLines: 6)));
+    expect(tester.widget<TextField>(find.byType(TextField)).minLines, 6);
+  });
+
+  testWidgets('bordered, indicator and maxCharacter map to TInput shell', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      wrap(
+        const TTextarea(
+          initialValue: 'a中',
+          bordered: true,
+          maxCharacter: 8,
+          indicator: true,
+        ),
+      ),
+    );
+
+    expect(find.text('3/8'), findsOneWidget);
+    final shell = tester
+        .widgetList<DecoratedBox>(find.byType(DecoratedBox))
+        .first;
+    expect((shell.decoration as BoxDecoration).border, isNotNull);
+    expect(
+      (shell.decoration as BoxDecoration).borderRadius,
+      BorderRadius.circular(TThemeData.defaultData().radiusDefault),
+    );
+    expect(
+      tester.widget<TextField>(find.byType(TextField)).inputFormatters,
+      contains(isNot(isA<LengthLimitingTextInputFormatter>())),
+    );
+  });
+
+  testWidgets('default textarea stays square unless border radius is themed', (
+    tester,
+  ) async {
+    await tester.pumpWidget(wrap(const TTextarea()));
+
+    final shell = tester
+        .widgetList<DecoratedBox>(find.byType(DecoratedBox))
+        .first;
+    expect((shell.decoration as BoxDecoration).borderRadius, BorderRadius.zero);
+  });
+
+  testWidgets('label, placeholder and indicator use textarea tokens', (
+    tester,
+  ) async {
+    final token = TThemeData.defaultData();
+    await tester.pumpWidget(
+      wrap(
+        const TTextarea(
+          label: '标签文字',
+          hintText: '请输入文字',
+          maxLength: 200,
+          indicator: true,
+        ),
+      ),
+    );
+
+    final label = tester.widget<Text>(find.text('标签文字'));
+    expect(label.style?.fontSize, token.fontBodyMedium?.size);
+    expect(label.style?.height, token.fontBodyMedium?.height);
+    expect(label.style?.color, token.textColorPrimary);
+
+    expect(
+      tester
+          .widget<Text>(
+            find
+                .text(
+                  tester.widget<TTextarea>(find.byType(TTextarea)).hintText!,
+                )
+                .last,
+          )
+          .style
+          ?.fontSize,
+      token.fontBodyMedium?.size,
+    );
+    expect(
+      tester
+          .widget<Text>(
+            find
+                .text(
+                  tester.widget<TTextarea>(find.byType(TTextarea)).hintText!,
+                )
+                .last,
+          )
+          .style
+          ?.height,
+      token.fontBodyMedium?.height,
+    );
+    expect(
+      tester
+          .widget<Text>(
+            find
+                .text(
+                  tester.widget<TTextarea>(find.byType(TTextarea)).hintText!,
+                )
+                .last,
+          )
+          .style
+          ?.color,
+      token.textColorPlaceholder,
+    );
+
+    final indicator = tester.widget<Text>(find.text('0/200'));
+    expect(indicator.style?.fontSize, token.fontBodySmall?.size);
+    expect(indicator.style?.height, token.fontBodySmall?.height);
+    expect(indicator.style?.color, token.textColorPlaceholder);
+    expect(
+      find.byWidgetPredicate(
+        (widget) => widget is SizedBox && widget.height == token.spacer,
+      ),
+      findsAtLeastNWidgets(1),
+    );
+    expect(
+      find.byWidgetPredicate(
+        (widget) => widget is SizedBox && widget.width == token.spacer2,
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('label defaults to horizontal layout with token spacing', (
+    tester,
+  ) async {
+    final token = TThemeData.defaultData();
+    await tester.pumpWidget(
+      wrap(
+        const SizedBox(
+          width: 375,
+          child: TTextarea(label: '标签文字', hintText: '请输入文字'),
+        ),
+      ),
+    );
+
+    final labelRect = tester.getRect(find.text('标签文字'));
+    final fieldRect = tester.getRect(find.byType(TextField));
+    expect(fieldRect.left - labelRect.right, token.spacer2);
+    expect(labelRect.top, tester.getRect(find.text('请输入文字')).top);
+    expect(
+      alphabeticBaseline(tester, find.text('标签文字')),
+      closeTo(alphabeticBaseline(tester, find.text('请输入文字')), 0.01),
+    );
+  });
+
+  testWidgets('bounded textarea keeps the indicator 16px from the bottom', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      wrap(
+        const SizedBox(
+          width: 375,
+          height: 162,
+          child: TTextarea(
+            label: '标签文字',
+            hintText: '请输入文字',
+            minLines: 3,
+            maxLength: 500,
+            indicator: true,
+          ),
+        ),
+      ),
+    );
+
+    final textareaRect = tester.getRect(find.byType(TTextarea));
+    final indicatorRect = tester.getRect(find.text('0/500'));
+    expect(textareaRect.bottom - indicatorRect.bottom, 16);
+  });
+
+  testWidgets('vertical layout stacks label above editor with token spacing', (
+    tester,
+  ) async {
+    final token = TThemeData.defaultData();
+    await tester.pumpWidget(
+      wrap(
+        const SizedBox(
+          width: 375,
+          child: TTextarea(
+            label: '标签文字',
+            hintText: '请输入文字',
+            layout: TTextareaLayout.vertical,
+          ),
+        ),
+      ),
+    );
+
+    final labelRect = tester.getRect(find.text('标签文字'));
+    final fieldRect = tester.getRect(find.byType(TextField));
+    expect(fieldRect.top - labelRect.bottom, token.spacer);
+    expect(fieldRect.left, labelRect.left);
+  });
+
+  testWidgets('textarea label uses TDesign token and disabled semantics', (
+    tester,
+  ) async {
+    final token = TThemeData.defaultData();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: TThemeBuilder.light(token).copyWith(
+          textTheme: const TextTheme(
+            bodyMedium: TextStyle(
+              color: Colors.purple,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        home: const Scaffold(body: TTextarea(label: 'enabled')),
+      ),
+    );
+
+    final enabled = tester.widget<Text>(find.text('enabled')).style;
+    expect(enabled?.color, token.textColorPrimary);
+    expect(enabled?.fontWeight, token.fontBodyMedium?.fontWeight);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: TThemeBuilder.light(token).copyWith(
+          textTheme: const TextTheme(
+            bodyMedium: TextStyle(color: Colors.purple),
+          ),
+        ),
+        home: const Scaffold(
+          body: TTextarea(label: 'disabled', enabled: false),
+        ),
+      ),
+    );
+    expect(
+      tester.widget<Text>(find.text('disabled')).style?.color,
+      token.textColorDisabled,
+    );
+  });
+
+  testWidgets('textarea owns default padding and form item removes it', (
+    tester,
+  ) async {
+    await tester.pumpWidget(wrap(const TTextarea(hintText: 'standalone')));
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is Padding && widget.padding == const EdgeInsets.all(16),
+      ),
+      findsOneWidget,
+    );
+
+    await tester.pumpWidget(
+      wrap(
+        const TFormItem(
+          label: '字段',
+          child: TTextarea(hintText: 'in form'),
+        ),
+      ),
+    );
+    expect(find.text('字段'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(TTextarea),
+        matching: find.byWidgetPredicate(
+          (widget) =>
+              widget is Padding && widget.padding == const EdgeInsets.all(16),
+        ),
+      ),
+      findsNothing,
+    );
+  });
+
+  testWidgets('rebinds its focus listener when focusNode changes', (
+    tester,
+  ) async {
+    final firstFocusNode = FocusNode();
+    final secondFocusNode = FocusNode();
+
+    await tester.pumpWidget(wrap(TTextarea(focusNode: firstFocusNode)));
+    await tester.pumpWidget(wrap(TTextarea(focusNode: secondFocusNode)));
+    secondFocusNode.requestFocus();
+    await tester.pump();
+
+    expect(secondFocusNode.hasFocus, isTrue);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    firstFocusNode.dispose();
+    secondFocusNode.dispose();
+  });
+
+  testWidgets('semantic statuses use their matching border tokens', (
+    tester,
+  ) async {
+    final token = TThemeData.defaultData();
+    const cases = {
+      TInputStatus.success: 'success',
+      TInputStatus.warning: 'warning',
+      TInputStatus.error: 'error',
+    };
+    final colors = {
+      TInputStatus.success: token.successColor,
+      TInputStatus.warning: token.warningColor,
+      TInputStatus.error: token.errorColor,
+    };
+
+    for (final entry in cases.entries) {
+      await tester.pumpWidget(
+        wrap(
+          TTextarea(
+            key: ValueKey(entry.value),
+            bordered: true,
+            status: entry.key,
+          ),
+        ),
+      );
+      final shell = tester
+          .widgetList<DecoratedBox>(find.byType(DecoratedBox))
+          .first;
+      final border = (shell.decoration as BoxDecoration).border! as Border;
+      expect(border.top.color, colors[entry.key]);
+    }
+  });
+
+  test('TTextarea rejects controller with initialValue', () {
+    final controller = TextEditingController();
+    expect(
+      () => TTextarea(controller: controller, initialValue: 'invalid'),
+      throwsAssertionError,
+    );
+    controller.dispose();
+  });
+}

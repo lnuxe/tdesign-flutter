@@ -1,0 +1,421 @@
+import 'package:flutter/rendering.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:tdesign_flutter/src/components/icon/t_icon.dart'
+    show TIconStyleScope;
+import 'package:tdesign_flutter/tdesign_flutter.dart';
+
+/// TIcon Widget 测试
+///
+/// 覆盖基础渲染、构造器参数、Material IconTheme 隔离、
+/// TIcon.fromName 工厂构造。
+void main() {
+  testWidgets(
+    'Material icon effects cannot change TD icons or caller content',
+    (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: IconTheme(
+              data: IconThemeData(
+                opacity: 0.2,
+                fill: 1,
+                weight: 900,
+                grade: 200,
+                opticalSize: 48,
+                shadows: [Shadow(blurRadius: 5)],
+                applyTextScaling: true,
+              ),
+              child: Column(
+                children: [
+                  TIcon(TIcons.home, color: Colors.red),
+                  Icon(Icons.home, color: Colors.red),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      final td = find.descendant(
+        of: find.byType(TIcon),
+        matching: find.byType(RichText),
+      );
+      expect(
+        tester.renderObject<RenderParagraph>(td).text.style!.color,
+        Colors.red,
+      );
+      final native = find.byType(Icon).last;
+      final nativeText = find.descendant(
+        of: native,
+        matching: find.byType(RichText),
+      );
+      expect(
+        tester.renderObject<RenderParagraph>(nativeText).text.style!.color!.a,
+        closeTo(0.2, 0.01),
+      );
+      final owned = tester.widget<Icon>(
+        find.descendant(of: find.byType(TIcon), matching: find.byType(Icon)),
+      );
+      expect(owned.shadows, isEmpty);
+      expect(owned.fill, 0);
+      expect(owned.weight, 400);
+      expect(owned.grade, 0);
+      expect(owned.opticalSize, 24);
+      expect(owned.applyTextScaling, isFalse);
+    },
+  );
+
+  /// 完整包装，注入 TDesign 全局主题。
+  Widget wrapWithTheme(
+    Widget child, {
+    IconThemeData? iconTheme,
+    ThemeData? materialTheme,
+  }) {
+    final theme =
+        materialTheme ?? TThemeBuilder.light(TThemeData.defaultData());
+    return MaterialApp(
+      theme: theme,
+      home: Scaffold(
+        body: iconTheme == null
+            ? child
+            : IconTheme(data: iconTheme, child: child),
+      ),
+    );
+  }
+
+  // ============================================================
+  // T01 – 基础渲染
+  // ============================================================
+  testWidgets('T01 - 基础渲染：渲染 TDesign 图标', (tester) async {
+    await tester.pumpWidget(wrapWithTheme(const TIcon(TIcons.home_filled)));
+    expect(find.byType(TIcon), findsOneWidget);
+    expect(find.byType(Icon), findsOneWidget);
+  });
+
+  testWidgets('T01b - 完整主题下默认图标使用文本主色而非品牌色', (tester) async {
+    final token = TThemeData.defaultData();
+    await tester.pumpWidget(wrapWithTheme(const TIcon(TIcons.home_filled)));
+
+    final icon = tester.widget<Icon>(find.byType(Icon));
+    expect(icon.color, token.textColorPrimary);
+    expect(icon.color, isNot(token.brandColor));
+  });
+
+  for (final brightness in Brightness.values) {
+    testWidgets('T01c - ${brightness.name} 主题使用对应文本主色 Token', (tester) async {
+      final token = TThemeData.defaultData();
+      final theme = brightness == Brightness.light
+          ? TThemeBuilder.light(token)
+          : TThemeBuilder.dark(token);
+      await tester.pumpWidget(
+        wrapWithTheme(const TIcon(TIcons.home_filled), materialTheme: theme),
+      );
+
+      final icon = tester.widget<Icon>(find.byType(Icon));
+      expect(icon.color, theme.extension<TThemeData>()?.textColorPrimary);
+    });
+  }
+
+  // ============================================================
+  // T02 – 构造器参数覆盖
+  // ============================================================
+  testWidgets('T02 - 构造器 size 生效', (tester) async {
+    const customSize = 48.0;
+    await tester.pumpWidget(
+      wrapWithTheme(const TIcon(TIcons.setting, size: customSize)),
+    );
+
+    final icon = tester.widget<Icon>(find.byType(Icon));
+    expect(icon.size, customSize);
+  });
+
+  testWidgets('T02b - 构造器 color 生效', (tester) async {
+    const customColor = Colors.red;
+    await tester.pumpWidget(
+      wrapWithTheme(const TIcon(TIcons.check_circle, color: customColor)),
+    );
+
+    final icon = tester.widget<Icon>(find.byType(Icon));
+    expect(icon.color, customColor);
+  });
+
+  // ============================================================
+  // T03 – Material IconTheme 不反向控制 TDesign 图标
+  // ============================================================
+  testWidgets('T03 - IconTheme size 不覆盖默认尺寸', (tester) async {
+    const themeSize = 32.0;
+    await tester.pumpWidget(
+      wrapWithTheme(
+        const TIcon(TIcons.home_filled),
+        iconTheme: const IconThemeData(size: themeSize),
+      ),
+    );
+
+    final icon = tester.widget<Icon>(find.byType(Icon));
+    expect(icon.size, 24.0);
+  });
+
+  testWidgets('T03b - IconTheme color 不覆盖 Token', (tester) async {
+    const themeColor = Colors.blue;
+    await tester.pumpWidget(
+      wrapWithTheme(
+        const TIcon(TIcons.star_filled),
+        iconTheme: const IconThemeData(color: themeColor),
+      ),
+    );
+
+    final icon = tester.widget<Icon>(find.byType(Icon));
+    expect(icon.color, TThemeData.defaultData().textColorPrimary);
+  });
+
+  testWidgets('T03c - 构造器参数优先于 Theme', (tester) async {
+    const themeSize = 20.0;
+    const constructorSize = 40.0;
+    await tester.pumpWidget(
+      wrapWithTheme(
+        const TIcon(TIcons.home_filled, size: constructorSize),
+        iconTheme: const IconThemeData(size: themeSize),
+      ),
+    );
+
+    final icon = tester.widget<Icon>(find.byType(Icon));
+    expect(icon.size, constructorSize);
+  });
+
+  // ============================================================
+  // T04 – 裸 TDesign Token 回退
+  // ============================================================
+  testWidgets('T04 - Material IconTheme 不覆盖 TDesign 默认值', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(
+          extensions: [TThemeData.defaultData()],
+          iconTheme: const IconThemeData(size: 28.0, color: Colors.green),
+        ),
+        home: const Scaffold(body: Center(child: TIcon(TIcons.check))),
+      ),
+    );
+
+    final icon = tester.widget<Icon>(find.byType(Icon));
+    expect(icon.size, 24.0);
+    expect(icon.color, TThemeData.defaultData().textColorPrimary);
+  });
+
+  testWidgets('T04a - 裸 TThemeData 注入时颜色兜底到 token', (tester) async {
+    final token = TThemeData.defaultData();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(extensions: [token], iconTheme: const IconThemeData()),
+        home: const Scaffold(body: Center(child: TIcon(TIcons.check))),
+      ),
+    );
+
+    final icon = tester.widget<Icon>(find.byType(Icon));
+    expect(icon.color, token.textColorPrimary);
+  });
+
+  testWidgets('T04b - 完整主题忽略局部 Material IconTheme', (tester) async {
+    await tester.pumpWidget(
+      wrapWithTheme(
+        const IconTheme(
+          data: IconThemeData(size: 30.0, color: Colors.green),
+          child: TIcon(TIcons.check),
+        ),
+      ),
+    );
+
+    final icon = tester.widget<Icon>(find.byType(Icon));
+    expect(icon.size, 24.0);
+    expect(icon.color, TThemeData.defaultData().textColorPrimary);
+  });
+
+  testWidgets('T04c - 嵌套 Material IconTheme 不覆盖 TDesign 默认值', (tester) async {
+    await tester.pumpWidget(
+      wrapWithTheme(
+        const IconTheme(
+          data: IconThemeData(size: 30.0, color: Colors.green),
+          child: TIcon(TIcons.check),
+        ),
+        iconTheme: const IconThemeData(size: 22, color: Colors.orange),
+      ),
+    );
+
+    final icon = tester.widget<Icon>(find.byType(Icon));
+    expect(icon.size, 24.0);
+    expect(icon.color, TThemeData.defaultData().textColorPrimary);
+  });
+
+  testWidgets('T04d - 构造器覆盖 IconTheme', (tester) async {
+    await tester.pumpWidget(
+      wrapWithTheme(
+        const TIcon(TIcons.check, size: 26, color: Colors.red),
+        iconTheme: const IconThemeData(size: 22, color: Colors.orange),
+      ),
+    );
+
+    final icon = tester.widget<Icon>(find.byType(Icon));
+    expect(icon.size, 26);
+    expect(icon.color, Colors.red);
+  });
+
+  // ============================================================
+  // T05 – TIcon.fromName 工厂构造
+  // ============================================================
+  testWidgets('T05 - fromName 合法名渲染图标', (tester) async {
+    await tester.pumpWidget(wrapWithTheme(TIcon.fromName('home_filled')));
+    expect(find.byType(TIcon), findsOneWidget);
+    expect(find.byType(Icon), findsOneWidget);
+  });
+
+  testWidgets('T05b - fromName 带参数', (tester) async {
+    const customSize = 36.0;
+    await tester.pumpWidget(
+      wrapWithTheme(TIcon.fromName('setting', size: customSize)),
+    );
+
+    final icon = tester.widget<Icon>(find.byType(Icon));
+    expect(icon.size, customSize);
+  });
+
+  test('T05b2 - fromName 完整透传图标和构造器参数', () {
+    const key = ValueKey('named-icon');
+    final icon = TIcon.fromName(
+      'setting',
+      key: key,
+      size: 36,
+      color: Colors.purple,
+      semanticLabel: '设置',
+    );
+
+    expect(icon.key, key);
+    expect(icon.icon, TIcons.setting);
+    expect(icon.size, 36);
+    expect(icon.color, Colors.purple);
+    expect(icon.semanticLabel, '设置');
+  });
+
+  test('T05c - fromName 非法名抛出异常', () {
+    expect(
+      () => TIcon.fromName('__non_existent_icon__'),
+      throwsA(isA<ArgumentError>()),
+    );
+  });
+
+  testWidgets('T05d - semanticLabel 透传原生语义且空值不产生标签', (tester) async {
+    final semantics = tester.ensureSemantics();
+    try {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          const Row(
+            children: [
+              TIcon(TIcons.setting, semanticLabel: '设置'),
+              TIcon(TIcons.home),
+            ],
+          ),
+        ),
+      );
+
+      expect(find.bySemanticsLabel('设置'), findsOneWidget);
+      expect(find.bySemanticsLabel('home'), findsNothing);
+    } finally {
+      semantics.dispose();
+    }
+  });
+
+  testWidgets('T07 - IconTheme 不为 TDesign 图标提供默认尺寸和颜色', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(extensions: [TThemeData.defaultData()]),
+        home: const Scaffold(
+          body: Center(
+            child: IconTheme(
+              data: IconThemeData(size: 32.0, color: Colors.green),
+              child: TIcon(TIcons.home),
+            ),
+          ),
+        ),
+      ),
+    );
+    final icon = tester.widget<Icon>(find.byIcon(TIcons.home));
+    expect(icon.size, 24.0);
+    expect(icon.color, TThemeData.defaultData().textColorPrimary);
+  });
+
+  testWidgets('T08 - 多个 TIcon 同时渲染', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(extensions: [TThemeData.defaultData()]),
+        home: const Scaffold(
+          body: Center(
+            child: Row(
+              children: [
+                TIcon(TIcons.home),
+                TIcon(TIcons.search),
+                TIcon(TIcons.user),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(find.byIcon(TIcons.home), findsOneWidget);
+    expect(find.byIcon(TIcons.search), findsOneWidget);
+    expect(find.byIcon(TIcons.user), findsOneWidget);
+  });
+
+  testWidgets('T09 - 库内作用域传递已解析样式且实例参数仍优先', (tester) async {
+    Widget scopedIcons(Color color, double size) => wrapWithTheme(
+      TIconStyleScope(
+        color: color,
+        size: size,
+        child: const Row(
+          children: [
+            TIcon(TIcons.home),
+            TIcon(TIcons.search, size: 30, color: Colors.green),
+          ],
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(scopedIcons(Colors.blue, 18));
+    expect(tester.widget<Icon>(find.byIcon(TIcons.home)).color, Colors.blue);
+    expect(tester.widget<Icon>(find.byIcon(TIcons.home)).size, 18);
+    expect(tester.widget<Icon>(find.byIcon(TIcons.search)).color, Colors.green);
+    expect(tester.widget<Icon>(find.byIcon(TIcons.search)).size, 30);
+
+    await tester.pumpWidget(scopedIcons(Colors.red, 22));
+    expect(tester.widget<Icon>(find.byIcon(TIcons.home)).color, Colors.red);
+    expect(tester.widget<Icon>(find.byIcon(TIcons.home)).size, 22);
+  });
+
+  test('T10 - 库内作用域只在颜色或尺寸改变时通知', () {
+    const original = TIconStyleScope(
+      color: Colors.blue,
+      size: 18,
+      child: SizedBox(),
+    );
+    expect(
+      const TIconStyleScope(
+        color: Colors.blue,
+        size: 18,
+        child: SizedBox(),
+      ).updateShouldNotify(original),
+      isFalse,
+    );
+    expect(
+      const TIconStyleScope(
+        color: Colors.red,
+        size: 18,
+        child: SizedBox(),
+      ).updateShouldNotify(original),
+      isTrue,
+    );
+    expect(
+      const TIconStyleScope(
+        color: Colors.blue,
+        size: 22,
+        child: SizedBox(),
+      ).updateShouldNotify(original),
+      isTrue,
+    );
+  });
+}

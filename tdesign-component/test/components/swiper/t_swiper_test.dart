@@ -1,0 +1,1572 @@
+import 'dart:async';
+
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
+import 'package:flutter_test/flutter_test.dart';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
+
+void main() {
+  testWidgets(
+    'Swiper rejects repeated invalid replacement and retains actual binding',
+    (tester) async {
+      final first = TSwiperController();
+      final second = TSwiperController();
+      TSwiper swiper(String id, TSwiperController controller) => TSwiper(
+        key: ValueKey(id),
+        controller: controller,
+        loop: false,
+        children: const [Text('page 0'), Text('page 1')],
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Column(
+              children: [
+                SizedBox(height: 100, child: swiper('first', first)),
+                SizedBox(height: 100, child: swiper('second', second)),
+              ],
+            ),
+          ),
+        ),
+      );
+      final element = tester.element(find.byKey(const ValueKey('second')));
+      expect(() => element.update(swiper('second', first)), throwsStateError);
+      expect(
+        () => element.owner!.buildScope(
+          tester.binding.rootElement!,
+          () => element.update(swiper('second', first)),
+        ),
+        throwsStateError,
+      );
+      expect(
+        tester.widget<TSwiper>(find.byKey(const ValueKey('second'))).controller,
+        same(first),
+      );
+      second.jumpTo(1);
+      await tester.pumpAndSettle();
+      expect(second.index, 1);
+      expect(first.index, 0);
+      await tester.pumpWidget(const SizedBox());
+      first.dispose();
+      second.dispose();
+    },
+  );
+
+  Widget app(
+    Widget child, {
+    TSwiperThemeData? swiperTheme,
+    Brightness brightness = Brightness.light,
+    Size size = const Size(320, 200),
+  }) {
+    final tokens = TThemeData.defaultData();
+    var theme = brightness == Brightness.light
+        ? TThemeBuilder.light(tokens)
+        : TThemeBuilder.dark(tokens);
+    if (swiperTheme != null) {
+      theme = theme.mergeExtension(swiperTheme);
+    }
+    return MaterialApp(
+      theme: theme,
+      home: Scaffold(
+        body: SizedBox(width: size.width, height: size.height, child: child),
+      ),
+    );
+  }
+
+  const pages = [Text('page-0'), Text('page-1'), Text('page-2')];
+
+  PageController pageControllerOf(WidgetTester tester) =>
+      tester.widget<PageView>(find.byType(PageView)).controller!;
+
+  group('TSwiperController', () {
+    testWidgets('initialIndex 决定首次展示页', (tester) async {
+      final controller = TSwiperController(initialIndex: 1);
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        app(TSwiper(controller: controller, children: pages)),
+      );
+
+      expect(controller.hasClients, isTrue);
+      expect(controller.index, 1);
+      expect(pageControllerOf(tester).initialPage, 1);
+    });
+
+    testWidgets('jumpTo、animateTo、next 和 previous 驱动实际页', (tester) async {
+      final controller = TSwiperController();
+      addTearDown(controller.dispose);
+      final changed = <int>[];
+      await tester.pumpWidget(
+        app(
+          TSwiper(
+            controller: controller,
+            onChanged: changed.add,
+            children: pages,
+          ),
+        ),
+      );
+
+      controller.jumpTo(2);
+      await tester.pump();
+      expect(controller.index, 2);
+
+      var operation = controller.previous();
+      await tester.pumpAndSettle();
+      await operation;
+      expect(controller.index, 1);
+
+      operation = controller.animateTo(0);
+      await tester.pumpAndSettle();
+      await operation;
+      expect(controller.index, 0);
+
+      operation = controller.next();
+      await tester.pumpAndSettle();
+      await operation;
+      expect(controller.index, 1);
+      expect(changed, containsAllInOrder([2, 1, 0, 1]));
+    });
+
+    testWidgets('未显式覆盖时继承 Swiper 动画时长，单次参数优先', (tester) async {
+      final controller = TSwiperController();
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        app(
+          TSwiper(
+            controller: controller,
+            animationDuration: const Duration(milliseconds: 500),
+            children: pages,
+          ),
+        ),
+      );
+
+      var operation = controller.next();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(pageControllerOf(tester).page, inExclusiveRange(0, 1));
+      await tester.pumpAndSettle();
+      await operation;
+      expect(controller.index, 1);
+
+      operation = controller.next(
+        duration: const Duration(milliseconds: 50),
+        curve: Curves.linear,
+      );
+      await tester.pump();
+      await tester.pumpAndSettle();
+      await operation;
+      expect(controller.index, 2);
+    });
+
+    testWidgets('非循环目标钳制并在边界保持不动', (tester) async {
+      final controller = TSwiperController();
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        app(TSwiper(controller: controller, children: pages)),
+      );
+
+      controller.jumpTo(99);
+      await tester.pump();
+      expect(controller.index, 2);
+      final operation = controller.next();
+      await tester.pumpAndSettle();
+      await operation;
+      expect(controller.index, 2);
+    });
+
+    testWidgets('loop 的 next/previous 各移动一个虚拟页', (tester) async {
+      final controller = TSwiperController(initialIndex: 2);
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        app(TSwiper(controller: controller, loop: true, children: pages)),
+      );
+      final pageController = pageControllerOf(tester);
+      final initial = pageController.initialPage;
+
+      var operation = controller.next();
+      await tester.pumpAndSettle();
+      await operation;
+      expect(controller.index, 0);
+      expect(pageController.page, initial + 1);
+
+      operation = controller.previous();
+      await tester.pumpAndSettle();
+      await operation;
+      expect(controller.index, 2);
+      expect(pageController.page, initial);
+    });
+
+    testWidgets('loop animateTo 始终向前到达目标', (tester) async {
+      final controller = TSwiperController(initialIndex: 2);
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        app(TSwiper(controller: controller, loop: true, children: pages)),
+      );
+      final pageController = pageControllerOf(tester);
+      final initial = pageController.initialPage;
+
+      final operation = controller.animateTo(0);
+      await tester.pumpAndSettle();
+      await operation;
+      expect(pageController.page, initial + 1);
+      expect(controller.index, 0);
+    });
+
+    testWidgets('外部 Controller 由调用方持有且卸载后可复用', (tester) async {
+      final controller = TSwiperController();
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        app(TSwiper(controller: controller, children: pages)),
+      );
+      expect(controller.hasClients, isTrue);
+
+      await tester.pumpWidget(app(const SizedBox()));
+      expect(controller.hasClients, isFalse);
+
+      await tester.pumpWidget(
+        app(TSwiper(controller: controller, children: pages)),
+      );
+      expect(controller.hasClients, isTrue);
+    });
+
+    testWidgets('替换 Controller 使用新的 initialIndex 并通知实际页', (tester) async {
+      final first = TSwiperController();
+      final second = TSwiperController(initialIndex: 2);
+      addTearDown(first.dispose);
+      addTearDown(second.dispose);
+      final changed = <int>[];
+      var controller = first;
+      late StateSetter update;
+      await tester.pumpWidget(
+        app(
+          StatefulBuilder(
+            builder: (context, setState) {
+              update = setState;
+              return TSwiper(
+                controller: controller,
+                onChanged: changed.add,
+                children: pages,
+              );
+            },
+          ),
+        ),
+      );
+
+      update(() => controller = second);
+      await tester.pump();
+      await tester.pump();
+      expect(first.hasClients, isFalse);
+      expect(second.index, 2);
+      expect(pageControllerOf(tester).initialPage, 2);
+      expect(changed, [2]);
+    });
+
+    testWidgets('同一个 Controller 不能同时控制两个 Swiper', (tester) async {
+      final controller = TSwiperController();
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        app(
+          Column(
+            children: [
+              Expanded(
+                child: TSwiper(controller: controller, children: pages),
+              ),
+              Expanded(
+                child: TSwiper(controller: controller, children: pages),
+              ),
+            ],
+          ),
+        ),
+      );
+      expect(tester.takeException(), isStateError);
+    });
+
+    testWidgets('数据减少时钳制当前页并通知', (tester) async {
+      final controller = TSwiperController(initialIndex: 2);
+      addTearDown(controller.dispose);
+      var children = pages;
+      final changed = <int>[];
+      late StateSetter update;
+      await tester.pumpWidget(
+        app(
+          StatefulBuilder(
+            builder: (context, setState) {
+              update = setState;
+              return TSwiper(
+                controller: controller,
+                onChanged: changed.add,
+                children: children,
+              );
+            },
+          ),
+        ),
+      );
+
+      update(() => children = const [Text('only')]);
+      await tester.pump();
+      await tester.pump();
+      expect(controller.index, 0);
+      expect(changed, [0]);
+    });
+
+    testWidgets('同一 children 列表原地减少时仍钳制当前页', (tester) async {
+      final controller = TSwiperController(initialIndex: 2);
+      addTearDown(controller.dispose);
+      final children = <Widget>[
+        const Text('one'),
+        const Text('two'),
+        const Text('three'),
+      ];
+      late StateSetter update;
+      await tester.pumpWidget(
+        app(
+          StatefulBuilder(
+            builder: (context, setState) {
+              update = setState;
+              return TSwiper(controller: controller, children: children);
+            },
+          ),
+        ),
+      );
+
+      update(() => children.removeRange(1, children.length));
+      await tester.pump();
+      await tester.pump();
+      expect(controller.index, 0);
+      expect(pageControllerOf(tester).initialPage, 0);
+    });
+  });
+
+  group('autoplay lifecycle', () {
+    testWidgets('定时切换并在非循环末页停止', (tester) async {
+      final controller = TSwiperController();
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        app(
+          TSwiper(
+            controller: controller,
+            autoplay: true,
+            autoplayInterval: const Duration(milliseconds: 50),
+            pagination: TSwiperPaginationVariant.none,
+            children: pages,
+          ),
+        ),
+      );
+
+      await tester.pump(const Duration(milliseconds: 60));
+      await tester.pumpAndSettle();
+      expect(controller.index, 1);
+      await tester.pump(const Duration(milliseconds: 60));
+      await tester.pumpAndSettle();
+      expect(controller.index, 2);
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(controller.index, 2);
+    });
+
+    testWidgets('由单页更新为多页后启动 autoplay', (tester) async {
+      final controller = TSwiperController();
+      addTearDown(controller.dispose);
+      var children = const <Widget>[Text('only')];
+      late StateSetter update;
+      await tester.pumpWidget(
+        app(
+          StatefulBuilder(
+            builder: (context, setState) {
+              update = setState;
+              return TSwiper(
+                controller: controller,
+                autoplay: true,
+                autoplayInterval: const Duration(milliseconds: 50),
+                pagination: TSwiperPaginationVariant.none,
+                children: children,
+              );
+            },
+          ),
+        ),
+      );
+
+      update(() => children = pages);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 60));
+      await tester.pumpAndSettle();
+      expect(controller.index, 1);
+    });
+
+    testWidgets('TickerMode 关闭和应用非 resumed 时暂停', (tester) async {
+      final controller = TSwiperController();
+      addTearDown(controller.dispose);
+      var tickerEnabled = false;
+      late StateSetter update;
+      await tester.pumpWidget(
+        app(
+          StatefulBuilder(
+            builder: (context, setState) {
+              update = setState;
+              return TickerMode(
+                enabled: tickerEnabled,
+                child: TSwiper(
+                  controller: controller,
+                  autoplay: true,
+                  autoplayInterval: const Duration(milliseconds: 30),
+                  pagination: TSwiperPaginationVariant.none,
+                  children: pages,
+                ),
+              );
+            },
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 40));
+      expect(controller.index, 0);
+
+      update(() => tickerEnabled = true);
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await tester.pump(const Duration(milliseconds: 40));
+      expect(controller.index, 0);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump(const Duration(milliseconds: 40));
+      await tester.pumpAndSettle();
+      expect(controller.index, 1);
+    });
+
+    testWidgets('在应用已暂停时首次挂载不会启动 autoplay', (tester) async {
+      final controller = TSwiperController();
+      addTearDown(controller.dispose);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+
+      await tester.pumpWidget(
+        app(
+          TSwiper(
+            controller: controller,
+            autoplay: true,
+            autoplayInterval: const Duration(milliseconds: 30),
+            pagination: TSwiperPaginationVariant.none,
+            children: pages,
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 40));
+      expect(controller.index, 0);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump(const Duration(milliseconds: 40));
+      await tester.pumpAndSettle();
+      expect(controller.index, 1);
+    });
+
+    testWidgets('Controller jump 后重新等待完整 interval', (tester) async {
+      final controller = TSwiperController();
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        app(
+          TSwiper(
+            controller: controller,
+            autoplay: true,
+            loop: true,
+            autoplayInterval: const Duration(seconds: 1),
+            pagination: TSwiperPaginationVariant.none,
+            children: pages,
+          ),
+        ),
+      );
+
+      await tester.pump(const Duration(milliseconds: 300));
+      controller.jumpTo(1);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(controller.index, 1);
+      await tester.pump(const Duration(milliseconds: 700));
+      await tester.pumpAndSettle();
+      expect(controller.index, 2);
+    });
+
+    testWidgets('用户拖拽期间暂停并在稳定后重新等待完整 interval', (tester) async {
+      final controller = TSwiperController();
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        app(
+          TSwiper(
+            controller: controller,
+            autoplay: true,
+            autoplayInterval: const Duration(seconds: 1),
+            pagination: TSwiperPaginationVariant.none,
+            children: pages,
+          ),
+        ),
+      );
+
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byType(PageView)),
+      );
+      await gesture.moveBy(const Offset(-1, 0));
+      await tester.pump(const Duration(milliseconds: 1200));
+      expect(controller.index, 0);
+
+      await gesture.up();
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(controller.index, 0);
+      await tester.pump(const Duration(milliseconds: 700));
+      await tester.pumpAndSettle();
+      expect(controller.index, 1);
+    });
+  });
+
+  group('pagination and effects', () {
+    testWidgets('页面滚动后 dots 选中态和 fraction 实际下标同步更新', (tester) async {
+      await tester.pumpWidget(app(const TSwiper(children: pages)));
+
+      await tester.drag(find.byType(PageView), const Offset(-300, 0));
+      await tester.pumpAndSettle();
+      final selectedDot = tester.widget<Semantics>(
+        find.bySemanticsLabel('2 / 3'),
+      );
+      expect(selectedDot.properties.selected, isTrue);
+
+      final fractionController = TSwiperController();
+      addTearDown(fractionController.dispose);
+      await tester.pumpWidget(
+        app(
+          TSwiper(
+            controller: fractionController,
+            pagination: TSwiperPaginationVariant.fraction,
+            children: pages,
+          ),
+        ),
+      );
+      fractionController.jumpTo(2);
+      await tester.pump();
+      expect(find.text('3/3'), findsOneWidget);
+    });
+
+    testWidgets('横竖 dotsBar 使用对应主轴长度', (tester) async {
+      const theme = TSwiperThemeData(dotSize: 8, activeDotExtent: 24);
+      await tester.pumpWidget(
+        app(
+          const TSwiper(
+            pagination: TSwiperPaginationVariant.dotsBar,
+            children: pages,
+          ),
+          swiperTheme: theme,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.getSize(find.byKey(const ValueKey('swiper-dot-0'))),
+        const Size(34, 8),
+      );
+
+      await tester.pumpWidget(
+        app(
+          const TSwiper(
+            scrollDirection: Axis.vertical,
+            pagination: TSwiperPaginationVariant.dotsBar,
+            children: pages,
+          ),
+          swiperTheme: theme,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.getSize(find.byKey(const ValueKey('swiper-dot-0'))),
+        const Size(8, 34),
+      );
+    });
+
+    testWidgets('默认 alignment 随滚动轴变化', (tester) async {
+      await tester.pumpWidget(app(const TSwiper(children: pages)));
+      expect(
+        tester.widget<Align>(find.byType(Align)).alignment,
+        Alignment.bottomCenter,
+      );
+
+      await tester.pumpWidget(
+        app(const TSwiper(scrollDirection: Axis.vertical, children: pages)),
+      );
+      expect(
+        tester.widget<Align>(find.byType(Align)).alignment,
+        Alignment.centerRight,
+      );
+
+      await tester.pumpWidget(
+        app(
+          const TSwiper(
+            pagination: TSwiperPaginationVariant.controls,
+            children: pages,
+          ),
+        ),
+      );
+      expect(
+        tester
+            .widgetList<Align>(find.byType(Align))
+            .map((align) => align.alignment),
+        contains(Alignment.center),
+      );
+    });
+
+    testWidgets('fraction 保持右下角内容宽度而不横向拉伸', (tester) async {
+      await tester.pumpWidget(
+        app(
+          const TSwiper(
+            pagination: TSwiperPaginationVariant.fraction,
+            children: pages,
+          ),
+          swiperTheme: const TSwiperThemeData(
+            paginationAlignment: Alignment.bottomRight,
+          ),
+        ),
+      );
+
+      expect(tester.getSize(find.text('1/3')).width, lessThan(40));
+      expect(
+        tester.getSize(find.byType(DecoratedBox).last).width,
+        lessThan(60),
+      );
+    });
+
+    testWidgets('outside 横向放在下方且竖向放在右侧', (tester) async {
+      await tester.pumpWidget(
+        app(
+          const TSwiper(
+            paginationPlacement: TSwiperPaginationPlacement.outside,
+            children: pages,
+          ),
+        ),
+      );
+      final horizontalPage = tester.getRect(find.byType(PageView));
+      final horizontalPagination = tester.getRect(
+        find.bySemanticsLabel('1 / 3'),
+      );
+      expect(horizontalPage.height, lessThan(200));
+      expect(
+        horizontalPagination.top,
+        greaterThanOrEqualTo(horizontalPage.bottom),
+      );
+
+      await tester.pumpWidget(
+        app(
+          const TSwiper(
+            scrollDirection: Axis.vertical,
+            paginationPlacement: TSwiperPaginationPlacement.outside,
+            children: pages,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final verticalPage = tester.getRect(find.byType(PageView));
+      final verticalPagination = tester.getRect(find.bySemanticsLabel('1 / 3'));
+      expect(verticalPage.width, lessThan(320));
+      expect(verticalPagination.left, greaterThanOrEqualTo(verticalPage.right));
+    });
+
+    testWidgets('outside 切换按钮保留外部区域并可驱动翻页', (tester) async {
+      await tester.pumpWidget(
+        app(
+          const TSwiper(
+            pagination: TSwiperPaginationVariant.controls,
+            paginationPlacement: TSwiperPaginationPlacement.outside,
+            children: pages,
+          ),
+        ),
+      );
+
+      final page = tester.getRect(find.byType(PageView));
+      final controls = tester.getRect(find.byType(IconButton).first);
+      expect(controls.top, greaterThanOrEqualTo(page.bottom));
+
+      await tester.tap(find.byTooltip('Next page'));
+      await tester.pumpAndSettle();
+      expect(find.text('page-1'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('竖向 fraction 在窄空间与自定义主题下保持可布局', (tester) async {
+      await tester.pumpWidget(
+        app(
+          const TSwiper(
+            scrollDirection: Axis.vertical,
+            pagination: TSwiperPaginationVariant.fraction,
+            children: pages,
+          ),
+          size: const Size(72, 120),
+          swiperTheme: const TSwiperThemeData(
+            paginationMargin: EdgeInsets.all(4),
+            fractionStyle: TextStyle(fontSize: 14),
+            fractionBackgroundColor: Colors.black,
+          ),
+        ),
+      );
+
+      final page = tester.getRect(find.byType(PageView));
+      final fraction = tester.getRect(find.text('1/3'));
+      expect(fraction.center.dx, greaterThan(page.center.dx));
+      expect(fraction.width, lessThan(page.width));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('placement 仅由实例 API 控制', (tester) async {
+      await tester.pumpWidget(
+        app(
+          const TSwiper(
+            paginationPlacement: TSwiperPaginationPlacement.overlay,
+            children: pages,
+          ),
+        ),
+      );
+      expect(tester.getSize(find.byType(PageView)), const Size(320, 200));
+    });
+
+    testWidgets('自定义标记获得业务下标并随实际页更新', (tester) async {
+      final controller = TSwiperController();
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        app(
+          TSwiper(
+            controller: controller,
+            paginationItemBuilder: (context, details) {
+              return SizedBox(
+                key: ValueKey(
+                  'custom-marker-${details.index}-${details.isActive}',
+                ),
+                width: details.isActive ? 18 : 6,
+                height: 6,
+                child: Text('${details.currentIndex}:${details.itemCount}'),
+              );
+            },
+            children: pages,
+          ),
+        ),
+      );
+
+      expect(
+        find.byKey(const ValueKey('custom-marker-0-true')),
+        findsOneWidget,
+      );
+      expect(find.text('0:3'), findsNWidgets(3));
+
+      controller.jumpTo(2);
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('custom-marker-2-true')),
+        findsOneWidget,
+      );
+      final selectedSemantics = tester
+          .widgetList<Semantics>(find.byType(Semantics))
+          .singleWhere((widget) => widget.properties.label == '3 / 3');
+      expect(selectedSemantics.properties.selected, isTrue);
+      expect(find.text('2:3'), findsNWidgets(3));
+    });
+
+    testWidgets('窄空间下自定义标记不会被默认 fraction 回退替换', (tester) async {
+      await tester.pumpWidget(
+        app(
+          TSwiper(
+            itemCount: 40,
+            itemBuilder: (_, index) => Text('$index'),
+            paginationItemBuilder: (_, details) => SizedBox.square(
+              key: ValueKey('compact-marker-${details.index}'),
+              dimension: 2,
+            ),
+          ),
+          size: const Size(160, 100),
+        ),
+      );
+
+      expect(find.byKey(const ValueKey('compact-marker-0')), findsOneWidget);
+      expect(find.byKey(const ValueKey('compact-marker-39')), findsOneWidget);
+      expect(find.text('1/40'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('竖向 cardMargin 使用 vertical padding', (tester) async {
+      await tester.pumpWidget(
+        app(
+          const TSwiper(
+            scrollDirection: Axis.vertical,
+            pageEffect: TSwiperPageEffect.cardMargin,
+            children: pages,
+          ),
+        ),
+      );
+      final paddings = tester.widgetList<Padding>(find.byType(Padding));
+      expect(
+        paddings.any(
+          (padding) =>
+              padding.padding == const EdgeInsets.symmetric(vertical: 6),
+        ),
+        isTrue,
+      );
+    });
+
+    testWidgets('竖向 controls 使用上下箭头', (tester) async {
+      await tester.pumpWidget(
+        app(
+          const TSwiper(
+            scrollDirection: Axis.vertical,
+            loop: true,
+            pagination: TSwiperPaginationVariant.controls,
+            children: pages,
+          ),
+        ),
+      );
+      expect(find.byIcon(Icons.keyboard_arrow_up), findsOneWidget);
+      expect(find.byIcon(Icons.keyboard_arrow_down), findsOneWidget);
+    });
+
+    testWidgets('自定义 controls 图标保留按钮行为和边界禁用状态', (tester) async {
+      final controller = TSwiperController();
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        app(
+          TSwiper(
+            controller: controller,
+            pagination: TSwiperPaginationVariant.controls,
+            previousIcon: const Icon(
+              Icons.first_page,
+              key: ValueKey('previous'),
+            ),
+            nextIcon: const Icon(Icons.last_page, key: ValueKey('next')),
+            children: pages,
+          ),
+        ),
+      );
+
+      expect(find.byKey(const ValueKey('previous')), findsOneWidget);
+      expect(find.byKey(const ValueKey('next')), findsOneWidget);
+      final buttons = tester.widgetList<IconButton>(find.byType(IconButton));
+      expect(buttons.first.onPressed, isNull);
+      expect(buttons.last.onPressed, isNotNull);
+      expect(
+        buttons.first.style?.minimumSize?.resolve({}),
+        const Size.square(32),
+      );
+      expect(
+        tester.getSize(find.byType(IconButton).first),
+        const Size.square(48),
+      );
+
+      await tester.tap(find.byKey(const ValueKey('next')));
+      await tester.pumpAndSettle();
+      expect(controller.index, 1);
+    });
+
+    testWidgets('controls 默认颜色在深浅主题下均保持内容对比度', (tester) async {
+      for (final brightness in Brightness.values) {
+        await tester.pumpWidget(
+          app(
+            const TSwiper(
+              loop: true,
+              pagination: TSwiperPaginationVariant.controls,
+              children: pages,
+            ),
+            brightness: brightness,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final button = tester.widget<IconButton>(find.byType(IconButton).first);
+        final state = <WidgetState>{};
+        final defaults = TThemeData.defaultData();
+        final token = brightness == Brightness.dark ? defaults.dark! : defaults;
+        expect(
+          token.textColorAnti,
+          brightness == Brightness.dark
+              ? const Color(0xE6FFFFFF)
+              : Colors.white,
+        );
+        expect(button.style?.backgroundColor?.resolve(state), token.fontGray3);
+        expect(
+          button.style?.foregroundColor?.resolve(state),
+          token.textColorAnti,
+          reason: 'brightness=$brightness',
+        );
+      }
+    });
+
+    testWidgets('横竖四种 pagination 组成无溢出的视觉矩阵', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(800, 1200));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      const variants = [
+        TSwiperPaginationVariant.dots,
+        TSwiperPaginationVariant.dotsBar,
+        TSwiperPaginationVariant.fraction,
+        TSwiperPaginationVariant.controls,
+      ];
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: TThemeBuilder.light(TThemeData.defaultData()),
+          home: Scaffold(
+            body: Column(
+              children: [
+                for (final axis in Axis.values)
+                  for (final variant in variants)
+                    Expanded(
+                      child: TSwiper(
+                        scrollDirection: axis,
+                        pagination: variant,
+                        children: pages,
+                      ),
+                    ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      expect(find.byType(PageView), findsNWidgets(8));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('横向 controls 根据 RTL 与 reverse 选择箭头方向', (tester) async {
+      await tester.pumpWidget(
+        app(
+          const Directionality(
+            textDirection: TextDirection.rtl,
+            child: TSwiper(
+              loop: true,
+              pagination: TSwiperPaginationVariant.controls,
+              children: pages,
+            ),
+          ),
+        ),
+      );
+      expect(
+        tester.widgetList<Icon>(find.byType(Icon)).map((icon) => icon.icon),
+        containsAllInOrder([Icons.chevron_right, Icons.chevron_left]),
+      );
+
+      await tester.pumpWidget(
+        app(
+          const Directionality(
+            textDirection: TextDirection.rtl,
+            child: TSwiper(
+              loop: true,
+              reverse: true,
+              pagination: TSwiperPaginationVariant.controls,
+              children: pages,
+            ),
+          ),
+        ),
+      );
+      expect(
+        tester.widgetList<Icon>(find.byType(Icon)).map((icon) => icon.icon),
+        containsAllInOrder([Icons.chevron_left, Icons.chevron_right]),
+      );
+    });
+
+    testWidgets('多 dots 超出空间时回退 fraction', (tester) async {
+      await tester.pumpWidget(
+        app(
+          TSwiper(itemCount: 40, itemBuilder: (_, index) => Text('$index')),
+          size: const Size(160, 100),
+        ),
+      );
+      expect(find.text('1/40'), findsOneWidget);
+    });
+
+    testWidgets('viewportFraction 透传并显示页面效果', (tester) async {
+      await tester.pumpWidget(
+        app(
+          const TSwiper(
+            viewportFraction: 0.8,
+            pageEffect: TSwiperPageEffect.scaleAndFade,
+            children: pages,
+          ),
+        ),
+      );
+      expect(pageControllerOf(tester).viewportFraction, 0.8);
+      expect(find.byType(Opacity), findsWidgets);
+    });
+
+    testWidgets('纵向 scaleAndFade 裁切相邻卡片且保持可滑动', (tester) async {
+      await tester.pumpWidget(
+        app(
+          const TSwiper(
+            scrollDirection: Axis.vertical,
+            viewportFraction: 0.8,
+            pageEffect: TSwiperPageEffect.scaleAndFade,
+            children: pages,
+          ),
+        ),
+      );
+
+      expect(find.byType(ClipRect), findsWidgets);
+      await tester.drag(find.byType(PageView), const Offset(0, -500));
+      await tester.pumpAndSettle();
+      expect(pageControllerOf(tester).page, isNot(0));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('scale 按设计稿等比缩放相邻卡片', (tester) async {
+      await tester.pumpWidget(
+        app(
+          const TSwiper(
+            viewportFraction: 0.8,
+            pageEffect: TSwiperPageEffect.scale,
+            children: pages,
+          ),
+        ),
+      );
+
+      final transforms = tester.widgetList<Transform>(find.byType(Transform));
+      expect(
+        transforms.any((transform) {
+          final matrix = transform.transform.storage;
+          return (matrix[0] - 0.8).abs() < 0.000001 &&
+              (matrix[5] - 0.8).abs() < 0.000001;
+        }),
+        isTrue,
+      );
+    });
+
+    testWidgets('默认圆角和反色 dots 由组件提供，Theme 可逐字段覆盖', (tester) async {
+      await tester.pumpWidget(app(const TSwiper(children: pages)));
+      final clip = tester.widget<ClipRRect>(find.byType(ClipRRect));
+      expect(clip.borderRadius, BorderRadius.circular(9));
+      final dots = tester
+          .widgetList<AnimatedContainer>(find.byType(AnimatedContainer))
+          .toList();
+      final activeDecoration = dots.first.decoration! as BoxDecoration;
+      final inactiveDecoration = dots[1].decoration! as BoxDecoration;
+      expect(activeDecoration.color, Colors.white);
+      expect(inactiveDecoration.color, Colors.white.withValues(alpha: 0.55));
+
+      await tester.pumpWidget(
+        app(
+          const TSwiper(children: pages),
+          swiperTheme: const TSwiperThemeData(
+            borderRadius: BorderRadius.zero,
+            activeColor: Colors.red,
+            inactiveColor: Colors.black,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widgetList<ClipRRect>(find.byType(ClipRRect))
+            .map((clip) => clip.borderRadius),
+        contains(BorderRadius.zero),
+      );
+      final themedDots = tester
+          .widgetList<AnimatedContainer>(find.byType(AnimatedContainer))
+          .toList();
+      expect(
+        themedDots.map((dot) => (dot.decoration! as BoxDecoration).color),
+        containsAll([Colors.red, Colors.black]),
+      );
+    });
+  });
+
+  group('TSwiperThemeData', () {
+    const a = TSwiperThemeData(
+      paginationAlignment: Alignment.bottomLeft,
+      paginationMargin: EdgeInsets.all(2),
+      borderRadius: BorderRadius.all(Radius.circular(2)),
+      activeColor: Colors.red,
+      inactiveColor: Colors.black,
+      dotSize: 4,
+      activeDotExtent: 10,
+      dotSpacing: 2,
+      fractionStyle: TextStyle(fontSize: 10),
+      fractionBackgroundColor: Colors.white,
+      controlStyle: ButtonStyle(iconSize: WidgetStatePropertyAll(12)),
+    );
+    const b = TSwiperThemeData(
+      paginationAlignment: Alignment.topRight,
+      paginationMargin: EdgeInsets.all(6),
+      borderRadius: BorderRadius.all(Radius.circular(6)),
+      activeColor: Colors.blue,
+      inactiveColor: Colors.white,
+      dotSize: 8,
+      activeDotExtent: 20,
+      dotSpacing: 6,
+      fractionStyle: TextStyle(fontSize: 14),
+      fractionBackgroundColor: Colors.black,
+      controlStyle: ButtonStyle(iconSize: WidgetStatePropertyAll(20)),
+    );
+
+    test('copyWith 和 lerp 覆盖新增视觉字段', () {
+      final copied = a.copyWith(
+        activeDotExtent: 18,
+        controlStyle: const ButtonStyle(iconSize: WidgetStatePropertyAll(16)),
+        paginationAlignment: Alignment.center,
+      );
+      expect(copied.activeDotExtent, 18);
+      expect(copied.controlStyle!.iconSize!.resolve({}), 16);
+      expect(copied.paginationAlignment, Alignment.center);
+
+      final value = a.lerp(b, 0.5);
+      expect(value.activeDotExtent, 15);
+      expect(value.controlStyle!.iconSize!.resolve({}), 16);
+      expect(value.paginationAlignment, Alignment.center);
+      expect(value.borderRadius, const BorderRadius.all(Radius.circular(4)));
+      expect(value.fractionStyle?.fontSize, 12);
+    });
+
+    test('nullable 数值按运行时默认值平滑插值并拒绝无效视觉值', () {
+      const defaults = TSwiperThemeData();
+      const explicit = TSwiperThemeData(
+        dotSize: 8,
+        activeDotExtent: 20,
+        dotSpacing: 5,
+        controlStyle: ButtonStyle(iconSize: WidgetStatePropertyAll(18)),
+      );
+      expect(defaults.lerp(explicit, 0).dotSize, 6);
+      expect(defaults.lerp(explicit, 0.5).dotSize, 7);
+      expect(defaults.lerp(explicit, 1).dotSize, 8);
+      expect(explicit.lerp(defaults, 0).dotSize, 8);
+      expect(explicit.lerp(defaults, 0.5).dotSize, 7);
+      expect(explicit.lerp(defaults, 1).dotSize, 6);
+      expect(defaults.lerp(defaults, 0.5).dotSize, isNull);
+      expect(defaults.lerp(explicit, 0.5).activeDotExtent, 20);
+      expect(defaults.lerp(explicit, 0.5).dotSpacing, 5);
+      expect(
+        defaults.lerp(explicit, 0.5).controlStyle!.iconSize!.resolve({}),
+        18,
+      );
+      expect(() => TSwiperThemeData(dotSize: -1), throwsAssertionError);
+      expect(() => TSwiperThemeData(activeDotExtent: -1), throwsAssertionError);
+      expect(() => TSwiperThemeData(dotSpacing: -1), throwsAssertionError);
+    });
+  });
+
+  group('controls TD style ownership', () {
+    for (final m3 in [false, true]) {
+      for (final brightness in Brightness.values) {
+        Widget ownedApp(Widget swiper, ButtonStyle style) => MaterialApp(
+          theme: ThemeData(
+            useMaterial3: m3,
+            brightness: brightness,
+            iconButtonTheme: const IconButtonThemeData(
+              style: ButtonStyle(
+                backgroundColor: WidgetStatePropertyAll(Colors.orange),
+                iconSize: WidgetStatePropertyAll(70),
+                minimumSize: WidgetStatePropertyAll(Size.square(90)),
+                visualDensity: VisualDensity(horizontal: 4, vertical: 4),
+                enableFeedback: true,
+              ),
+            ),
+            extensions: [
+              brightness == Brightness.dark
+                  ? TThemeData.defaultData().dark!
+                  : TThemeData.defaultData(),
+              TSwiperThemeData(controlStyle: style),
+            ],
+          ),
+          home: Scaffold(
+            body: SizedBox(width: 320, height: 200, child: swiper),
+          ),
+        );
+        testWidgets(
+          'explicit colors, geometry and feedback M3=$m3 $brightness',
+          (tester) async {
+            await tester.pumpWidget(
+              ownedApp(
+                const TSwiper(
+                  loop: true,
+                  pagination: TSwiperPaginationVariant.controls,
+                  children: pages,
+                ),
+                const ButtonStyle(
+                  backgroundColor: WidgetStatePropertyAll(Colors.pink),
+                  foregroundColor: WidgetStatePropertyAll(Colors.green),
+                  iconColor: WidgetStatePropertyAll(Colors.purple),
+                  iconSize: WidgetStatePropertyAll(30),
+                  minimumSize: WidgetStatePropertyAll(Size.square(44)),
+                  fixedSize: WidgetStatePropertyAll(Size.square(60)),
+                  maximumSize: WidgetStatePropertyAll(Size.square(90)),
+                  padding: WidgetStatePropertyAll(EdgeInsets.all(6)),
+                  shape: WidgetStatePropertyAll(
+                    RoundedRectangleBorder(
+                      borderRadius: BorderRadius.all(Radius.circular(8)),
+                    ),
+                  ),
+                  side: WidgetStatePropertyAll(
+                    BorderSide(color: Colors.blue, width: 2),
+                  ),
+                  overlayColor: WidgetStatePropertyAll(Colors.yellow),
+                  visualDensity: VisualDensity(horizontal: -4, vertical: -4),
+                  enableFeedback: false,
+                  mouseCursor: WidgetStatePropertyAll(SystemMouseCursors.wait),
+                  animationDuration: Duration(milliseconds: 80),
+                  splashFactory: NoSplash.splashFactory,
+                ),
+              ),
+            );
+            await tester.pumpAndSettle();
+            final button = tester.widget<IconButton>(
+              find.byType(IconButton).first,
+            );
+            final style = button.style!;
+            expect(
+              tester.getSize(find.byType(IconButton).first),
+              const Size.square(60),
+            );
+            expect(style.minimumSize!.resolve({}), const Size.square(44));
+            expect(style.maximumSize!.resolve({}), const Size.square(90));
+            expect(style.padding!.resolve({}), const EdgeInsets.all(6));
+            expect(style.side!.resolve({})!.width, 2);
+            expect(style.visualDensity, VisualDensity.standard);
+            expect(style.enableFeedback, isFalse);
+            expect(style.mouseCursor!.resolve({}), SystemMouseCursors.wait);
+            expect(style.animationDuration, const Duration(milliseconds: 80));
+            expect(style.splashFactory, NoSplash.splashFactory);
+            final icon = tester.widget<Icon>(find.byIcon(Icons.chevron_left));
+            expect(icon.size, 30);
+            expect(icon.color, Colors.purple);
+            final material = tester.widget<Material>(
+              find
+                  .descendant(
+                    of: find.byType(IconButton).first,
+                    matching: find.byType(Material),
+                  )
+                  .first,
+            );
+            expect(material.color, Colors.pink);
+            expect(tester.takeException(), isNull);
+            for (final (style, size) in [
+              (
+                const ButtonStyle(
+                  minimumSize: WidgetStatePropertyAll(Size.square(60)),
+                ),
+                const Size.square(60),
+              ),
+              (
+                const ButtonStyle(
+                  padding: WidgetStatePropertyAll(EdgeInsets.all(12)),
+                ),
+                const Size.square(42),
+              ),
+              (
+                const ButtonStyle(
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                const Size.square(32),
+              ),
+            ]) {
+              await tester.pumpWidget(
+                ownedApp(
+                  const TSwiper(
+                    loop: true,
+                    pagination: TSwiperPaginationVariant.controls,
+                    children: pages,
+                  ),
+                  style,
+                ),
+              );
+              await tester.pumpAndSettle();
+              final surface = find
+                  .descendant(
+                    of: find.byType(IconButton).first,
+                    matching: find.byType(Material),
+                  )
+                  .first;
+              expect(tester.getSize(surface), size);
+              if (style.tapTargetSize != null) {
+                expect(tester.getSize(find.byType(IconButton).first), size);
+              }
+            }
+          },
+        );
+        testWidgets(
+          'state null uses Swiper defaults, explicit zero survives M3=$m3 $brightness',
+          (tester) async {
+            await tester.pumpWidget(
+              ownedApp(
+                const TSwiper(
+                  pagination: TSwiperPaginationVariant.controls,
+                  children: pages,
+                ),
+                ButtonStyle(
+                  backgroundColor: WidgetStateProperty.resolveWith(
+                    (s) => s.contains(WidgetState.pressed) ? Colors.pink : null,
+                  ),
+                  foregroundColor: WidgetStateProperty.resolveWith(
+                    (s) =>
+                        s.contains(WidgetState.hovered) ? Colors.green : null,
+                  ),
+                  iconSize: WidgetStateProperty.resolveWith(
+                    (s) => s.contains(WidgetState.pressed) ? 26 : null,
+                  ),
+                  padding: const WidgetStatePropertyAll(EdgeInsets.zero),
+                  side: const WidgetStatePropertyAll(BorderSide.none),
+                  overlayColor: const WidgetStatePropertyAll(
+                    Colors.transparent,
+                  ),
+                  visualDensity: const VisualDensity(
+                    horizontal: 4,
+                    vertical: 4,
+                  ),
+                ),
+              ),
+            );
+            await tester.pumpAndSettle();
+            final style = tester
+                .widget<IconButton>(find.byType(IconButton).last)
+                .style!;
+            final token = TThemeData.defaultData();
+            final td = brightness == Brightness.dark ? token.dark! : token;
+            for (final s in [
+              <WidgetState>{},
+              {WidgetState.hovered},
+              {WidgetState.focused},
+              {WidgetState.disabled},
+              {WidgetState.pressed},
+            ]) {
+              expect(
+                style.backgroundColor!.resolve(s),
+                s.contains(WidgetState.pressed)
+                    ? Colors.pink
+                    : s.contains(WidgetState.disabled)
+                    ? td.fontGray3.withValues(alpha: 0.35)
+                    : td.fontGray3,
+              );
+              expect(
+                style.foregroundColor!.resolve(s),
+                s.contains(WidgetState.hovered)
+                    ? Colors.green
+                    : s.contains(WidgetState.disabled)
+                    ? td.textColorAnti.withValues(alpha: 0.55)
+                    : td.textColorAnti,
+              );
+              expect(
+                style.iconSize!.resolve(s),
+                s.contains(WidgetState.pressed) ? 26 : 18,
+              );
+              expect(style.padding!.resolve(s), EdgeInsets.zero);
+              expect(style.side!.resolve(s), BorderSide.none);
+              expect(style.overlayColor!.resolve(s), Colors.transparent);
+            }
+            final previous = tester.widget<IconButton>(
+              find.byType(IconButton).first,
+            );
+            expect(previous.onPressed, isNull);
+            final gesture = await tester.startGesture(
+              tester.getCenter(find.byType(IconButton).last),
+            );
+            // Finish icon interpolation before native Tooltip long-press cancels the tap.
+            for (var frame = 0; frame < 3; frame++) {
+              await tester.pump(const Duration(milliseconds: 150));
+            }
+            expect(
+              tester.widget<Icon>(find.byIcon(Icons.chevron_right)).size,
+              26,
+            );
+            expect(
+              tester
+                  .widget<Material>(
+                    find
+                        .descendant(
+                          of: find.byType(IconButton).last,
+                          matching: find.byType(Material),
+                        )
+                        .first,
+                  )
+                  .color,
+              Colors.pink,
+            );
+            await gesture.up();
+            await tester.pumpAndSettle();
+            expect(find.text('page-1'), findsOneWidget);
+            expect(
+              tester.widget<Icon>(find.byIcon(Icons.chevron_right)).size,
+              18,
+            );
+            expect(tester.takeException(), isNull);
+          },
+        );
+        testWidgets(
+          'icons and layers retain caller theme and native navigation M3=$m3 $brightness',
+          (tester) async {
+            final observed = <String, ThemeData>{};
+            final controller = TSwiperController();
+            addTearDown(controller.dispose);
+            final changes = <int>[];
+            await tester.pumpWidget(
+              ownedApp(
+                TSwiper(
+                  controller: controller,
+                  onChanged: changes.add,
+                  pagination: TSwiperPaginationVariant.controls,
+                  previousIcon: Builder(
+                    builder: (context) {
+                      observed['icon'] = Theme.of(context);
+                      return const Icon(
+                        Icons.star,
+                        size: 22,
+                        color: Colors.blue,
+                      );
+                    },
+                  ),
+                  children: pages,
+                ),
+                ButtonStyle(
+                  iconSize: const WidgetStatePropertyAll(30),
+                  backgroundBuilder: (context, states, child) {
+                    observed['background'] = Theme.of(context);
+                    return child ?? const SizedBox.shrink();
+                  },
+                  foregroundBuilder: (context, states, child) {
+                    observed['foreground'] = Theme.of(context);
+                    return child ?? const SizedBox.shrink();
+                  },
+                ),
+              ),
+            );
+            await tester.pumpAndSettle();
+            for (final name in ['icon', 'background', 'foreground']) {
+              expect(observed[name]!.useMaterial3, m3);
+              expect(observed[name]!.brightness, brightness);
+              expect(
+                observed[name]!.iconButtonTheme.style!.iconSize!.resolve({}),
+                70,
+              );
+            }
+            expect(tester.widget<Icon>(find.byIcon(Icons.star)).size, 22);
+            await tester.tap(find.byTooltip('Next page'));
+            await tester.pumpAndSettle();
+            expect(controller.index, 1);
+            expect(changes, [1]);
+            Focus.of(
+              tester.element(find.byIcon(Icons.chevron_right)),
+            ).requestFocus();
+            await tester.pump();
+            await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+            await tester.pumpAndSettle();
+            expect(controller.index, 2);
+            expect(
+              tester.widget<IconButton>(find.byType(IconButton).last).onPressed,
+              isNull,
+            );
+          },
+        );
+      }
+    }
+    test('nullable style tween keeps owned defaults and valid constraints', () {
+      const from = TSwiperThemeData(
+        controlStyle: ButtonStyle(
+          minimumSize: WidgetStatePropertyAll(Size.square(44)),
+          fixedSize: WidgetStatePropertyAll(Size.square(60)),
+          maximumSize: WidgetStatePropertyAll(Size.square(90)),
+          backgroundColor: WidgetStatePropertyAll(Colors.pink),
+        ),
+      );
+      const to = TSwiperThemeData(
+        controlStyle: ButtonStyle(
+          minimumSize: WidgetStatePropertyAll(Size.square(60)),
+        ),
+      );
+      expect(from.lerp(to, 0).controlStyle, same(from.controlStyle));
+      expect(from.lerp(to, 1).controlStyle, same(to.controlStyle));
+      for (final t in [0.25, 0.5, 0.75]) {
+        final value = from.lerp(to, t).controlStyle!;
+        expect(value.minimumSize!.resolve({}), Size.square(44 + 16 * t));
+        expect(value.maximumSize!.resolve({}), Size.infinite);
+        expect(
+          value.backgroundColor!.resolve({}),
+          t < 0.5 ? Colors.pink : null,
+        );
+        expect(
+          value.fixedSize!.resolve({}),
+          t < 0.5 ? const Size.square(60) : null,
+        );
+      }
+      const geometry = TSwiperThemeData(
+        controlStyle: ButtonStyle(
+          iconSize: WidgetStatePropertyAll(30),
+          padding: WidgetStatePropertyAll(EdgeInsets.all(12)),
+          minimumSize: WidgetStatePropertyAll(Size.square(60)),
+          elevation: WidgetStatePropertyAll(4),
+          shape: WidgetStatePropertyAll(RoundedRectangleBorder()),
+          side: WidgetStatePropertyAll(BorderSide(width: 2)),
+          shadowColor: WidgetStatePropertyAll(Colors.black),
+          surfaceTintColor: WidgetStatePropertyAll(Colors.blue),
+        ),
+      );
+      final middle = const TSwiperThemeData().lerp(geometry, 0.5).controlStyle!;
+      expect(middle.iconSize!.resolve({}), 24);
+      expect(middle.minimumSize!.resolve({}), const Size.square(46));
+      expect(middle.padding!.resolve({}), const EdgeInsets.all(6));
+      expect(middle.elevation!.resolve({}), 2);
+      expect(middle.side!.resolve({})!.width, 1);
+      expect(middle.shape!.resolve({}), isNotNull);
+      expect(middle.shadowColor!.resolve({})!.a, closeTo(0.5, 0.01));
+      expect(middle.surfaceTintColor!.resolve({})!.a, closeTo(0.5, 0.01));
+    });
+    test('iconSize lerp uses 18dp for missing values and state nulls', () {
+      const defaults = TSwiperThemeData();
+      final explicit = TSwiperThemeData(
+        controlStyle: ButtonStyle(
+          iconSize: WidgetStateProperty.resolveWith(
+            (s) => s.contains(WidgetState.pressed) ? 30 : null,
+          ),
+        ),
+      );
+      for (final t in [0.0, 0.5, 1.0]) {
+        final forward = defaults.lerp(explicit, t).controlStyle?.iconSize;
+        final reverse = explicit.lerp(defaults, t).controlStyle?.iconSize;
+        expect(forward?.resolve({}) ?? 18, 18);
+        expect(forward?.resolve({WidgetState.pressed}) ?? 18, 18 + 12 * t);
+        expect(reverse?.resolve({WidgetState.pressed}) ?? 18, 30 - 12 * t);
+      }
+      expect(defaults.lerp(defaults, 0.5).controlStyle, isNull);
+      expect(
+        defaults
+            .lerp(
+              const TSwiperThemeData(
+                controlStyle: ButtonStyle(
+                  padding: WidgetStatePropertyAll(EdgeInsets.zero),
+                ),
+              ),
+              0.5,
+            )
+            .controlStyle!
+            .iconSize,
+        isNull,
+      );
+    });
+  });
+
+  group('constructor contracts', () {
+    test('拒绝无效内容、初始索引、视口和 autoplay 间隔', () {
+      expect(TSwiper.new, throwsAssertionError);
+      expect(
+        () => const TSwiper(children: []).createState(),
+        throwsArgumentError,
+      );
+      expect(
+        () => TSwiper(itemCount: 0, itemBuilder: (_, __) => const Text('x')),
+        throwsAssertionError,
+      );
+      expect(() => TSwiperController(initialIndex: -1), throwsArgumentError);
+      final outOfRange = TSwiperController(initialIndex: pages.length);
+      addTearDown(outOfRange.dispose);
+      expect(
+        () => TSwiper(controller: outOfRange, children: pages).createState(),
+        throwsRangeError,
+      );
+      expect(
+        () => TSwiper(viewportFraction: 0, children: pages),
+        throwsAssertionError,
+      );
+    });
+
+    test('创建状态时拒绝非正 autoplay 间隔', () {
+      expect(
+        () => const TSwiper(
+          autoplayInterval: Duration.zero,
+          children: pages,
+        ).createState(),
+        throwsArgumentError,
+      );
+      expect(
+        () => const TSwiper(
+          animationDuration: Duration.zero,
+          children: pages,
+        ).createState(),
+        throwsArgumentError,
+      );
+    });
+  });
+}

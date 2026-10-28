@@ -1,0 +1,40 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
+
+void main() {
+  test('TRadioThemeData copyWith and lerp preserve all visual fields', () {
+    const base = TRadioThemeData(
+      selectColor: Colors.blue,
+      disableColor: Colors.grey,
+      titleColor: Colors.black,
+      subTitleColor: Colors.black54,
+      backgroundColor: Colors.white,
+      spacing: 8,
+      insetSpacing: 12,
+    );
+    final copied = base.copyWith(
+      selectColor: Colors.red,
+      disableColor: Colors.black26,
+      titleColor: Colors.green,
+      subTitleColor: Colors.orange,
+      backgroundColor: Colors.yellow,
+      spacing: 10,
+      insetSpacing: 14,
+    );
+    expect(copied.selectColor, Colors.red);
+    expect(copied.disableColor, Colors.black26);
+    expect(copied.spacing, 10);
+    expect(copied.insetSpacing, 14);
+    final preserved = base.copyWith();
+    expect(preserved.selectColor, base.selectColor);
+    expect(preserved.disableColor, base.disableColor);
+    expect(preserved.titleColor, base.titleColor);
+    expect(preserved.subTitleColor, base.subTitleColor);
+    expect(preserved.backgroundColor, base.backgroundColor);
+    expect(preserved.spacing, base.spacing);
+    expect(preserved.insetSpacing, base.insetSpacing);
+    final lerped = base.lerp(copied, 0.5);
+    expect(lerped, isA<TRadioThemeData>());
+    expect(base.lerp(null, 0.5), same(base));
+  });
+}

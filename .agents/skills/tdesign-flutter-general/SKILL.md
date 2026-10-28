@@ -1,0 +1,112 @@
+---
+name: tdesign-flutter-general
+description: TDesign Flutter 通用协作约定，适用于仓库开发和 PR 工作，涵盖 Spec、更新日志、公开契约、生成产物、双版本及 CI 登记。组件对齐由 Review skill 补充，CNB 平台限制见仓库协作说明。
+---
+
+# TDesign Flutter 仓库通用协作约定（AI 版）
+
+本文档面向**所有**在本仓库工作的 AI 助手（通用 Codex / Cursor，以及 CNB 平台 NPC），提供平台无关的协作约定提炼。通用规范的**唯一事实来源**是 [`CONTRIBUTING.md`](../../../CONTRIBUTING.md) 与 [`specs/README.md`](../../../specs/README.md)，本文只做面向 AI 的落地提炼。
+
+Skills 按职责补充规范：本 skill 管通用协作与 CI 登记；[`tdesign-component-align-review`](../tdesign-component-align-review/SKILL.md) 管 Demo、API、Theme 与验收证据。CNB 静态约定见 [`.cnb/CONTRIBUTING.md`](../../../.cnb/CONTRIBUTING.md)，按该文档的适用范围读取，不作为通用 skill 加载。遇到冲突先核对规范本体与用户当前要求，不通过叠加规则扩大任务范围。
+
+## 一、何时创建 Spec / 何时写更新日志（核心判断规则）
+
+**「是否需要 Spec」与「是否需要更新日志」是两件独立的事**，由两套不同标准触发，不能互相推导：
+
+- **要不要 Spec** → 看**改动复杂度 / 是否碰公共契约**（面向开发者 / 维护者）。
+- **要不要写更新日志** → 看**用户感不感知得到**（面向用户，只写用户可感知的变更）。
+
+两轴交叉即四种情况（完整细则见 [`CONTRIBUTING.md`](../../../CONTRIBUTING.md)「PR 更新日志规范」）：
+
+| 用户是否可感知 ↓ | 可感知 | 无感 |
+| --- | --- | --- |
+| 复杂需求 / 公共契约变更 / 组件重构 / 跨目录改动（需 Spec） | **两者都要** | **只要 Spec**、不写日志 |
+| 简单局部修复 / 文案 / 格式等（无需完整 Spec） | **只要日志** | **两者都不需要** |
+
+**最容易出错**：把"勾选「本条 PR 不需要纳入 Changelog」"等同于"不需要 Spec"——这是错误的。行为不变的纯内部重构（用户无感、不写日志）仍属于组件修改，**需要 Spec**（Review 结合实际改动判定，属于重构）。
+
+## 二、提交 PR 与更新日志格式
+
+- PR 标题遵循 Conventional Commits：`type(scope): 描述`；分支及平台约定按 `AGENTS.md` 的入口读取。
+- PR 正文**完整保留 `.github/PULL_REQUEST_TEMPLATE.md` 原模板结构**（所有勾选项含未选 `[ ]`、所有 HTML 注释原样保留），只打勾 / 填写，不删减。
+- 生成组件 PR 的 Changelog 时，组件与 Demo 同改只保留组件行为条目；Demo 配套改动写在「需求背景和解决方案」并勾选对应 PR 性质。完整边界及独立交付例外见 [`CONTRIBUTING.md`「PR 更新日志规范」](../../../CONTRIBUTING.md#pr-更新日志规范)。
+- 更新日志条目遵循 Conventional Commits 的 commit type，与最终分组固定对应（完整见 [`CONTRIBUTING.md`](../../../CONTRIBUTING.md)）：
+
+  | commit type | 最终分组 | 示例 |
+  | --- | --- | --- |
+  | `breaking` | Breaking Changes | breaking(toast): 调整 xxx 默认行为 |
+  | `feat` | Features | feat(TButton): 新增渐变背景能力 |
+  | `fix` | Bug Fixes | fix(TInput): 修复密文模式下无法粘贴的问题 |
+  | `perf`、`refactor` | Performance | refactor(toast): 优化 xxx |
+  | `docs` | Documentation | docs: 更新主题生成器文档 |
+  | 其他（`chore` 等） | Others | chore: 升级依赖 |
+
+- **Breaking change 一律用 `breaking` commit type**（如 - breaking(toast): 调整 xxx 默认行为），自动归入 Breaking Changes 分组。
+- `tdesign-component/CHANGELOG.md` 由 CLI 自动生成，**无需人工维护**。
+
+## 三、Spec 流程
+
+第一节判定需要 Spec 后，按 [`specs/README.md`](../../../specs/README.md) 创建或更新对应记录（spec / plan / tasks / acceptance）。组件目录使用 `specs/components/<编号>-<组件分类>-<组件名>/`，组件名保留规范大小写，目录不附加事项后缀；同组件只维护一套主文档，多事项按章节合并，保留任务状态与文字验收结论，非组件使用 `specs/engineering/<编号>-<类别>-<事项描述>/` 并按长期职责合并；Theme 的配置职责与 Material 隔离合为一份，Token 运行验证归其验收与证据附件，不单设 Spec；控制器与导入归 ThemeController，Testing 仅维护 Golden，文档规则与用户指南不另设 Documentation Spec。类别、编号与归并规则以该规范为准，同步维护索引和全部路径引用。提交代码须与 Spec 行为契约一致，方案变更先更新 Spec 再改代码，并在 PR 附对应目录链接。
+
+### Spec 正文与证据
+
+保留设计背景、最终方案和影响实现的关键决策/取舍；被取代的方案摘要保留否决原因，不继续作为当前要求。plan 只记录实现组织与验证安排，tasks 集中维护真实剩余工作；验收标准不维护勾选状态，acceptance 只保留绑定候选/环境的结论、必要证据和未覆盖范围。清理重复/过时流水不能补造通过、丢失未完成项或把旧结果外推当前 head。遇到设计与源码冲突且缺裁定依据时明确列待核对，详见 [正文规范](../../../specs/README.md#文档边界与正文收敛)。
+
+## 四、Flutter 双版本兼容
+
+同时兼容 `flutter@3.32.0` 与 `flutter@latest`（stable 最新版）。改动时确认所用 API 在两版本均可用且行为一致，避免 low 版不可用 / high 版已移除；结论中标注对两版本的兼容性影响。
+
+## 五、组件变更的 breaking change 分析
+
+- 改公开 API 签名 / 默认行为 / 删除能力 → breaking change，需重点提示并评估迁移策略。
+- 仅新增可选参数且不改变既有行为，通常不算 breaking；新增必填参数或改变默认值需谨慎。
+- 输出时明确：是 / 否 breaking change、影响范围、受影响 API、迁移建议。
+
+## 六、文档来源与注释规范（注释即文档）
+
+| 文档载体 | 职责 | 何时维护 |
+|---------|------|---------|
+| **dartdoc 注释**（`///`） | 组件公开 API 的**用户文档** | 新增 / 修改公开 API 时**必须同步** |
+| **Spec** | 复杂需求 / 重构的设计文档 | 见「何时创建 Spec / 何时写更新日志」一节，先 Spec 后代码 |
+| **PR 更新日志** | 面向使用方用户的变更说明 | 见「何时创建 Spec / 何时写更新日志」一节，只写用户可感知的变更 |
+| **CHANGELOG.md** | 由 CLI 自动生成 | 不手动编辑 |
+| **CONTRIBUTING.md / specs/README.md** | 规范唯一事实来源 | 需引用时统一指向 |
+
+公开字段 / 参数 / 回调 / 枚举 / 类的 `///` 注释要写清"是什么、默认值、生效条件、三态语义、与相关字段关系"，注释必须与实现一致。
+
+## 七、脚本生成的产物（供 AI 理解，贡献者无需关注）
+
+本仓库的 **API 文档、示例代码片段、README 副本** 均由脚本从源码生成，`.github/workflows/autofix.yml` 会在 PR 时**自动运行**这些脚本并提交修正，因此**贡献者（人类）无需手动关注 / 运行它们**。但 **AI 助手需要理解每个脚本具体做什么**，以便在改动相关源文件时知道哪些产物是自动生成的、是否需要手动运行或校验：
+
+1. **API 文档**：`sh ./demo_tool/all_build.sh`（等价 `node tool/generate_api.mjs`，manifest 驱动），从组件 API 生成 `example/assets/api/<component>_api.md`；新增 / 迁移组件时先更新 `tool/components.json`。改动设计 / 组件 API 时该产物会随之变化。
+2. **示例代码片段**：`dart run tool/generate_example_code.dart`，从带 `@ExampleCode` 注解的示例方法生成 `example/assets/code/*.txt`；CI 用 `--check` 校验片段与源码同步。改动示例方法时该产物会随之变化。
+3. **README 副本**：`node scripts/sync-readme.mjs`，把根目录 `README.md` / `README_zh_CN.md` 同步到 `tdesign-component/README*.md`；站点 `site/docs/migration-0.2.7-to-1.0.md` 是迁移正文源，生成包内 `MIGRATION.md`。站点快速开始独立维护，不再由 README 生成；`--check` 只检查同步状态，不写文件。
+
+自动生成与本地验收不是同一件事：贡献者无需手工维护产物；组件对齐任务需要核对示例时，按 Review skill 校验生成片段，变化只能来自源文件，不能直接修改产物。
+
+### 跨仓库生成工具与 autofix
+
+生成能力来自独立工具仓库时，工具改动与组件改动分别交付；消费仓库不得长期引用工具 PR 分支或临时提交。先让所需工具版本进入消费仓库声明的正式 ref，再在组件最终源码上重新解析依赖、生成并校验产物。工具合并前启动的 CI 仍可能解析到旧版本，不能用稍后发生的工具合并推定该次运行已经生效。
+
+autofix 成功只表示自动修改流程执行成功，不表示提交前的生成产物正确或保持不变。每次 autofix 后读取最新 head 和自动提交 diff，确认没有删除公开 API、回退示例或引入范围外产物；若自动提交改变 head，后续 CI、Review 和合并结论均以新 head 为准。
+
+## 八、组件测试与 CI 回归门禁
+
+仓库使用集中式回归调度器，新增组件或为既有组件新增测试时，须按 [`CONTRIBUTING.md`](../../../CONTRIBUTING.md)「组件测试与 CI 回归门禁」登记：
+
+- 组件测试文件加入 `tool/run_component_regression.dart` 的 `componentTestSuites`；
+- 生产源码范围加入 `tool/check_component_coverage.dart` 的 `componentTargets`，手写生产 Dart 行覆盖率 `LH/LF >= 95%`；
+- Demo 结构、功能与交互测试登记到 GitHub / CNB 的双版本功能回归入口；纯 Golden 测试加入 `tool/run_visual_regression.dart` 的 `visualTestSuites`。执行环境与两类测试的分流要求见 Review skill 第 5 节；不得用视觉入口代替功能入口。
+- 运行调度器自测，确认三个清单同步且登记文件存在。
+
+测试文件存在、Golden 已提交或本地单独运行通过，不代表 CI 已执行；必须读取 CI 实际入口并确认测试已被调度。
+
+## 九、代码质量 / lint 零告警
+
+提交前运行 `flutter analyze --fatal-infos`，要求无诊断问题。能用 `const` 必须 `const`、优先 `final`、避免 lambda 替代 tear-off，并遵循当前 `analysis_options.yaml`；CI 配置仅证明已设门禁，是否通过需读取实际运行结果。
+
+## 回答风格
+
+- 回答使用与提问相同的语言（中文 / 英文）。
+- 结论先行，给出明确判断，再附必要依据与可操作建议。
+- 需要执行平台操作（建分支、提 PR、评论等）时，先核对仓库协作规范再动手。

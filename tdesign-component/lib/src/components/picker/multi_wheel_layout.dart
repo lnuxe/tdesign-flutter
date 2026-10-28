@@ -1,0 +1,92 @@
+import 'package:flutter/material.dart';
+import 'package:meta/meta.dart';
+
+import '../../theme/t_colors.dart';
+import '../../theme/t_radius.dart';
+import '../../theme/t_spacers.dart';
+import '../../theme/t_theme.dart';
+
+/// picker(多列滚轮): 中央高亮条与多列 Row 布局外壳
+///
+/// 供 TPicker、DateTimePickerWheel 共用 UI 壳；列内容与联动逻辑由调用方提供。
+/// 外壳绘制当前 TThemeData 的 bgColorContainer 底色及同色边缘渐隐，
+/// 不透出父面板底色。渐隐高度取 spacer5（48dp），且不超过滚轮高度的一半。
+@internal
+class MultiWheelLayout extends StatelessWidget {
+  const MultiWheelLayout({
+    super.key,
+    required this.height,
+    required this.itemHeight,
+    required this.columns,
+  });
+
+  /// 滚轮区域总高度
+  final double height;
+
+  /// 单行选项高度（用于定位中央高亮条）
+  final double itemHeight;
+
+  /// 各列子组件（通常每列为 WheelColumn 或其 Semantics 包装）
+  final List<Widget> columns;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = context.tTheme;
+    return ColoredBox(
+      color: theme.bgColorContainer,
+      child: SizedBox(
+        height: height,
+        width: double.infinity,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Positioned(
+              top: (height - itemHeight) / 2,
+              left: theme.spacer2,
+              right: theme.spacer2,
+              child: Container(
+                height: itemHeight,
+                decoration: BoxDecoration(
+                  color: theme.bgColorSecondaryContainer,
+                  borderRadius: BorderRadius.circular(theme.radiusDefault),
+                ),
+              ),
+            ),
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: theme.spacer4),
+              child: Row(
+                children: [
+                  for (final column in columns) Expanded(child: column),
+                ],
+              ),
+            ),
+            for (final top in [true, false])
+              Positioned(
+                top: top ? 0 : null,
+                bottom: top ? null : 0,
+                left: 0,
+                right: 0,
+                height: theme.spacer5.clamp(0, height / 2).toDouble(),
+                child: IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: top
+                            ? Alignment.topCenter
+                            : Alignment.bottomCenter,
+                        end: top ? Alignment.bottomCenter : Alignment.topCenter,
+                        colors: [
+                          theme.bgColorContainer,
+                          theme.bgColorContainer.withValues(alpha: 0),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}

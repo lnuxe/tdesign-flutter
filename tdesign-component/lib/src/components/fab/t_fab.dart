@@ -1,0 +1,162 @@
+import 'package:flutter/material.dart';
+
+import '../../theme/t_internal_material.dart';
+import 't_fab_defaults.dart';
+import 't_fab_drag.dart';
+import 't_fab_layout.dart';
+import 't_fab_resolve.dart';
+import 't_fab_theme_data.dart';
+
+export 't_fab_layout.dart'
+    show
+        TFabDragAxis,
+        TFabMagnet,
+        TFabBounds,
+        TFabDragDetails,
+        TFabDragCallback;
+
+class TFab extends StatelessWidget {
+  const TFab({
+    super.key,
+    this.text = '',
+    this.icon,
+    this.child,
+    this.onPressed,
+    this.tooltip,
+    this.semanticLabel,
+    this.right,
+    this.bottom,
+    this.draggable,
+    this.magnet,
+    this.xBounds,
+    this.yBounds,
+    this.onDragStart,
+    this.onDragEnd,
+    this.useSafeArea = true,
+  });
+
+  /// 应作为 [Stack] 的直接子组件使用；默认动作层使用 large / fill / primary，
+  /// 纯图标为圆形，图文为胶囊形，且不继承父级 TButtonThemeData。
+  /// 图标 + 文字形态；非空时内嵌 TButton 为 round 形状
+  final String text;
+
+  /// 图标；未传时使用 TDesign add 图标。
+  final Widget? icon;
+
+  /// 自定义内容；有则替代默认内嵌 TButton。
+  ///
+  /// 自定义内容自行负责尺寸、形状、颜色和投影；[TFab] 继续负责定位、拖拽、
+  /// 点击和禁用语义。
+  final Widget? child;
+
+  /// 点击回调，null 时禁用
+  final VoidCallback? onPressed;
+
+  /// 纯图标 Fab 的 tooltip 提示
+  final String? tooltip;
+
+  /// 读屏标签
+  final String? semanticLabel;
+
+  /// 距父级 Stack 内容区右侧偏移（默认 16）
+  final double? right;
+
+  /// 距父级 Stack 内容区底部偏移（默认 32）
+  final double? bottom;
+
+  /// 拖拽轴向；null 表示不启用拖拽，[TFabDragAxis.all] 表示全向拖拽
+  final TFabDragAxis? draggable;
+
+  /// 拖拽结束吸附方向；null 表示不吸附
+  final TFabMagnet? magnet;
+
+  /// 水平拖拽边界限制
+  final TFabBounds? xBounds;
+
+  /// 垂直拖拽边界限制
+  final TFabBounds? yBounds;
+
+  /// 拖拽开始回调
+  final TFabDragCallback? onDragStart;
+
+  /// 拖拽结束回调
+  final TFabDragCallback? onDragEnd;
+
+  /// 是否避让系统安全区。
+  ///
+  /// 默认为 true。固定定位的 [right]、[bottom] 从安全边界起算；
+  /// 拖拽与吸附范围同时避让四侧安全区。
+  final bool useSafeArea;
+
+  @override
+  Widget build(BuildContext context) {
+    // ---- resolve Theme ----
+    final theme = Theme.of(context).extension<TFabThemeData>();
+    final safePadding = useSafeArea
+        ? MediaQuery.paddingOf(context)
+        : EdgeInsets.zero;
+
+    // ---- resolveLayout ----
+    final layout = TFabResolve.resolveLayout(
+      right: right,
+      bottom: bottom,
+      draggable: draggable,
+      magnet: magnet,
+      xBounds: xBounds,
+      yBounds: yBounds,
+      themeDefaultRight: theme?.defaultRight,
+      themeDefaultBottom: theme?.defaultBottom,
+      themeDefaultXBounds: theme?.defaultXBounds,
+      themeDefaultYBounds: theme?.defaultYBounds,
+      safePadding: safePadding,
+    );
+
+    final dragTapSlop = theme?.dragTapSlop ?? TFabDefaults.defaultDragTapSlop;
+    final magnetDuration =
+        theme?.magnetAnimationDuration ??
+        TFabDefaults.defaultMagnetAnimationDuration;
+
+    // ---- 构建动作层 ----
+    final isChildMode = child != null;
+    Widget actionChild;
+
+    if (isChildMode) {
+      actionChild = child!;
+    } else {
+      actionChild = TFabResolve.resolveButton(
+        text: text,
+        icon: icon,
+        onPressed: onPressed,
+        context: context,
+      );
+    }
+
+    // 禁用时包 IgnorePointer（仅 child 模式，TButton 内部已处理禁用）
+    if (isChildMode && onPressed == null) {
+      actionChild = Semantics(
+        enabled: false,
+        child: Opacity(opacity: 0.4, child: IgnorePointer(child: actionChild)),
+      );
+    }
+
+    // Tooltip / Semantics
+    if (tooltip != null && tooltip!.isNotEmpty) {
+      actionChild = TInternalTooltip(message: tooltip!, child: actionChild);
+    }
+    if (semanticLabel != null && semanticLabel!.isNotEmpty) {
+      actionChild = Semantics(label: semanticLabel!, child: actionChild);
+    }
+
+    // ---- 定位层 ----
+    return buildFabPositioned(
+      layout: layout,
+      child: actionChild,
+      dragTapSlop: dragTapSlop,
+      onPressed: onPressed,
+      wrapFixedTap: isChildMode,
+      onDragStart: onDragStart,
+      onDragEnd: onDragEnd,
+      magnetAnimationDuration: magnetDuration,
+    );
+  }
+}

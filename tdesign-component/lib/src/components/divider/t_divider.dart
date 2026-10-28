@@ -1,0 +1,231 @@
+import 'package:flutter/material.dart';
+
+import '../../theme/t_colors.dart';
+import '../../theme/t_fonts.dart';
+import '../../theme/t_spacers.dart';
+import '../../theme/t_theme.dart';
+import '../text/t_text_resolve.dart';
+import '../text/t_text_style_scope.dart';
+import 't_divider_painter.dart';
+import 't_divider_theme_data.dart';
+
+/// 分割线布局方向
+enum TDividerLayout {
+  /// 水平分割线
+  horizontal,
+
+  /// 垂直分割线
+  vertical,
+}
+
+/// 中间内容在线条中的位置（仅 [TDividerLayout.horizontal] 生效）
+enum TDividerAlign {
+  /// 内容靠左
+  left,
+
+  /// 内容居中
+  center,
+
+  /// 内容靠右
+  right,
+}
+
+class TDivider extends StatelessWidget {
+  const TDivider({super.key, this.layout, this.align, this.dashed, this.child});
+
+  /// 横/竖分割线，默认 [TDividerLayout.horizontal]。
+  /// 竖向强制实线并忽略 align、child，默认高度 14、左右外边距 16 逻辑像素。
+  final TDividerLayout? layout;
+
+  /// 中间内容在线条中的位置，默认 [TDividerAlign.center]
+  /// 仅 [TDividerLayout.horizontal] 生效
+  final TDividerAlign? align;
+
+  /// 是否为虚线，默认 false
+  /// 仅 [TDividerLayout.horizontal] 生效
+  final bool? dashed;
+
+  /// 中间子元素
+  /// 纯文案用 `child: Text('……')`
+  final Widget? child;
+
+  @override
+  Widget build(BuildContext context) {
+    // ---- resolve 内联链 ----
+    // 优先级：构造器 > TDividerThemeData > TDesign Token。
+    final theme = Theme.of(context).extension<TDividerThemeData>();
+    final token = context.tTheme;
+
+    final effectiveLayout = layout ?? TDividerLayout.horizontal;
+
+    // L4 值按优先级 fallback
+    final effectiveColor = theme?.color ?? token.bgColorComponent;
+    final effectiveThickness = theme?.thickness ?? 0.5;
+    final effectiveIndent = theme?.indent;
+    final effectiveEndIndent = theme?.endIndent;
+    final effectiveGapPadding =
+        theme?.gapPadding ?? EdgeInsets.symmetric(horizontal: token.spacer1);
+    final effectiveMargin =
+        theme?.margin ?? _defaultMargin(effectiveLayout, token.spacer2);
+    final contentFont = token.fontBodySmall;
+    final defaultTextStyle = TextStyle(
+      fontSize: contentFont?.size ?? 12,
+      height: contentFont?.height ?? (20 / 12),
+      fontWeight: contentFont?.fontWeight ?? FontWeight.w400,
+      color: token.textColorPlaceholder,
+    );
+    final effectiveTextStyle = defaultTextStyle.merge(theme?.textStyle);
+
+    // ---- 按 layout 选模式 ----
+    Widget result;
+
+    if (effectiveLayout == TDividerLayout.vertical) {
+      // 竖线：仅模式 A，强制忽略 dashed / align / child
+      result = _buildVerticalLine(effectiveColor, effectiveThickness);
+    } else if (child != null) {
+      // 模式 B：横线 + 中间内容
+      final effectiveDashed = dashed ?? false;
+      final effectiveAlign = align ?? TDividerAlign.center;
+      result = _buildLineWithChild(
+        effectiveColor,
+        effectiveThickness,
+        effectiveGapPadding,
+        effectiveTextStyle,
+        effectiveDashed,
+        effectiveAlign,
+      );
+    } else {
+      // 模式 A：纯横线
+      final effectiveDashed = dashed ?? false;
+      result = _buildHorizontalLine(
+        effectiveColor,
+        effectiveThickness,
+        effectiveDashed,
+        effectiveIndent,
+        effectiveEndIndent,
+      );
+    }
+
+    result = Padding(padding: effectiveMargin, child: result);
+
+    return result;
+  }
+
+  /// 模式 A — 纯横线（实线或虚线）
+  Widget _buildHorizontalLine(
+    Color color,
+    double thickness,
+    bool isDashed,
+    double? indent,
+    double? endIndent,
+  ) {
+    Widget line;
+    if (isDashed) {
+      line = SizedBox(
+        height: thickness,
+        child: CustomPaint(
+          painter: DashedPainter(color: color, strokeWidth: thickness),
+        ),
+      );
+    } else {
+      line = Container(height: thickness, color: color);
+    }
+
+    // 缩进
+    if (indent != null || endIndent != null) {
+      line = Padding(
+        padding: EdgeInsetsDirectional.only(
+          start: indent ?? 0,
+          end: endIndent ?? 0,
+        ),
+        child: line,
+      );
+    }
+
+    return line;
+  }
+
+  /// 模式 A — 纯竖线（始终实线，默认高度 14dp）
+  Widget _buildVerticalLine(Color color, double thickness) {
+    return SizedBox(
+      width: thickness,
+      height: 14,
+      child: ColoredBox(color: color),
+    );
+  }
+
+  /// 模式 B — 横线 + 中间内容
+  Widget _buildLineWithChild(
+    Color color,
+    double thickness,
+    EdgeInsetsGeometry gapPadding,
+    TextStyle? effectiveTextStyle,
+    bool isDashed,
+    TDividerAlign align,
+  ) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 文字按实际宽度参与 Row 布局，剩余空间全部交给线段。
+        // 仅限制最大宽度以避免长内容溢出，并保留调用方的多行能力。
+        final reservedLineWidth = align == TDividerAlign.center ? 0.0 : 30.0;
+        final maxContentWidth = constraints.hasBoundedWidth
+            ? (constraints.maxWidth - reservedLineWidth)
+                  .clamp(0.0, double.infinity)
+                  .toDouble()
+            : double.infinity;
+        final middleContent = ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: maxContentWidth),
+          child: TTextStyleScope(
+            style: TTextResolve.resolve(
+              context: context,
+              style: effectiveTextStyle,
+            ),
+            child: Padding(padding: gapPadding, child: child!),
+          ),
+        );
+
+        // 默认缩进为 30 逻辑像素。
+        final shortLine = SizedBox(
+          width: 30,
+          height: thickness,
+          child: isDashed
+              ? CustomPaint(
+                  painter: DashedPainter(color: color, strokeWidth: thickness),
+                )
+              : Container(color: color),
+        );
+
+        Widget flexLine() => Expanded(
+          child: SizedBox(
+            height: thickness,
+            child: isDashed
+                ? CustomPaint(
+                    painter: DashedPainter(
+                      color: color,
+                      strokeWidth: thickness,
+                    ),
+                  )
+                : Container(color: color),
+          ),
+        );
+
+        final children = switch (align) {
+          TDividerAlign.left => [shortLine, middleContent, flexLine()],
+          TDividerAlign.center => [flexLine(), middleContent, flexLine()],
+          TDividerAlign.right => [flexLine(), middleContent, shortLine],
+        };
+
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: children,
+        );
+      },
+    );
+  }
+
+  EdgeInsetsGeometry _defaultMargin(TDividerLayout layout, double spacer16) {
+    return layout == TDividerLayout.horizontal
+        ? const EdgeInsets.symmetric(vertical: 10)
+        : EdgeInsets.symmetric(horizontal: spacer16);
+  }
+}

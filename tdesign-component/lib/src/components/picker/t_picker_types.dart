@@ -1,0 +1,143 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
+
+/// 选择器子项构建器。
+/// [context] 滚轮选项的构建上下文。
+/// [option] 当前选项数据。
+/// [columnIndex] 当前列索引，从 0 开始。
+/// [itemIndex] 当前选项在列中的索引，从 0 开始。
+/// [distance] 当前选项距滚轮中心的绝对距离，以选项高度为单位。
+///
+/// ## 返回值
+/// 当前选项内容；返回 null 时使用默认文字渲染。
+typedef TPickerItemBuilder =
+    Widget? Function(
+      BuildContext context,
+      TPickerOption option,
+      int columnIndex,
+      int itemIndex,
+      double distance,
+    );
+
+/// 选择器选项。
+///
+/// 选项及 [children] 按不可变数据使用；更新时创建新选项和新列表。
+@immutable
+class TPickerOption {
+  const TPickerOption({
+    required this.label,
+    required this.value,
+    this.disabled = false,
+    this.children = const [],
+  });
+
+  /// 展示文案。
+  final String label;
+
+  /// 业务值。
+  final Object? value;
+
+  /// 是否禁用。
+  final bool disabled;
+
+  /// 联动模式下的子选项。
+  final List<TPickerOption> children;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is TPickerOption &&
+          label == other.label &&
+          value == other.value &&
+          disabled == other.disabled &&
+          listEquals(children, other.children);
+
+  @override
+  int get hashCode =>
+      Object.hash(label, value, disabled, Object.hashAll(children));
+
+  @override
+  String toString() => 'TPickerOption($label, $value)';
+}
+
+/// 选择器数据源。
+@immutable
+sealed class TPickerItems {
+  const TPickerItems();
+}
+
+/// 互不联动的多列数据源。
+///
+/// [columns] 及每列列表不得原地修改；变更时传入新的数据源和列表。
+@immutable
+class TPickerColumns extends TPickerItems {
+  const TPickerColumns(this.columns);
+
+  /// 各列选项。
+  final List<List<TPickerOption>> columns;
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) {
+      return true;
+    }
+    if (other is! TPickerColumns || columns.length != other.columns.length) {
+      return false;
+    }
+    for (var index = 0; index < columns.length; index++) {
+      if (!listEquals(columns[index], other.columns[index])) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  @override
+  int get hashCode => Object.hashAll(columns.map(Object.hashAll));
+}
+
+/// 由 [TPickerOption.children] 描述层级关系的联动数据源。
+///
+/// [options] 及所有子选项列表不得原地修改；变更时创建新的数据源。
+@immutable
+class TPickerLinked extends TPickerItems {
+  const TPickerLinked(this.options);
+
+  /// 根选项。
+  final List<TPickerOption> options;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is TPickerLinked && listEquals(options, other.options);
+
+  @override
+  int get hashCode => Object.hashAll(options);
+}
+
+/// 各列当前选中项的只读快照。
+///
+/// 组件回调产生的列表不可修改。手工构造时，调用方须提供不可变列表；
+/// const 构造不会复制或冻结传入的 [selectedOptions] 和 [indexes]。
+@immutable
+class TPickerValue {
+  const TPickerValue({required this.selectedOptions, required this.indexes});
+
+  /// 各列选中的完整选项。
+  final List<TPickerOption> selectedOptions;
+
+  /// 各列选中索引。
+  final List<int> indexes;
+
+  /// 各列业务值。
+  List<Object?> get values =>
+      List.unmodifiable(selectedOptions.map((option) => option.value));
+
+  /// 各列展示文案。
+  List<String> get labels =>
+      List.unmodifiable(selectedOptions.map((option) => option.label));
+
+  @override
+  String toString() =>
+      'TPickerValue(labels: $labels, values: $values, indexes: $indexes)';
+}

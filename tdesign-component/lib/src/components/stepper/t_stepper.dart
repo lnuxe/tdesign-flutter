@@ -1,0 +1,640 @@
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show TextInputFormatter;
+import 'package:tdesign_flutter_icons/tdesign_flutter_icons.dart' show TIcons;
+
+import '../../theme/t_colors.dart';
+import '../../theme/t_fonts.dart';
+import '../../theme/t_internal_material.dart';
+import '../../theme/t_radius.dart';
+import '../../theme/t_sizes.dart';
+import '../../theme/t_theme.dart';
+import 't_stepper_defaults.dart';
+import 't_stepper_theme_data.dart';
+import 't_stepper_theme_interpolation.dart';
+import 't_stepper_types.dart';
+
+export 't_stepper_types.dart';
+
+class TStepper extends StatefulWidget {
+  const TStepper({
+    super.key,
+    required this.value,
+    this.onChanged,
+    this.min = 0,
+    this.max = 100,
+    this.step = 1,
+    this.size,
+    this.variant,
+  }) : assert(min <= max),
+       assert(value >= min && value <= max),
+       assert(step > 0);
+
+  /// 唯一受控数值，必须位于 [min] 与 [max] 之间。
+  ///
+  /// 父组件需要在 [onChanged] 后以新值重建组件，否则输入内容会恢复。
+  final num value;
+
+  /// 数值变化请求。
+  ///
+  /// 点击按钮、提交有效输入或输入框失焦时触发；一次操作最多触发一次。
+  /// 为 null 时加减按钮禁用、编辑器只读；不发出数值变化请求。
+  final ValueChanged<num>? onChanged;
+
+  /// 最小值，必须小于或等于 [max]。
+  final num min;
+
+  /// 最大值，必须大于或等于 [min]。
+  final num max;
+
+  /// 加减按钮使用的步长，必须大于 0。
+  ///
+  /// 输入提交不要求是步长的整数倍，但会限制在 [min] 与 [max] 之间。
+  /// 编辑时以合法输入草稿作为步进起点，并据此判断按钮是否达到边界。
+  final num step;
+
+  /// 组件尺寸。
+  ///
+  /// 为空时以 [TStepperSize.medium] 为最小尺寸，内置文字放大时可增长；显式 size 保持固定。
+  final TStepperSize? size;
+
+  /// 组件形态。
+  ///
+  /// 为空时使用 [TStepperVariant.normal]。
+  final TStepperVariant? variant;
+
+  @override
+  State<TStepper> createState() => _TStepperState();
+}
+
+class _TStepperState extends State<TStepper> {
+  late final TextEditingController _textController;
+  late final FocusNode _focusNode;
+  bool _editing = false;
+
+  bool get _disabled => widget.onChanged == null;
+  num get _stepBase => _editing
+      ? num.tryParse(_textController.text) ?? widget.value
+      : widget.value;
+  num get _effectiveMin => widget.min.isNaN ? 0 : widget.min;
+  num get _effectiveMax {
+    final min = _effectiveMin;
+    return widget.max.isNaN || widget.max < min ? min : widget.max;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _textController = TextEditingController(text: _format(widget.value));
+    _focusNode = FocusNode()..addListener(_handleFocusChange);
+  }
+
+  @override
+  void didUpdateWidget(covariant TStepper oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.value != widget.value) {
+      _editing = false;
+      _setText(widget.value);
+    }
+  }
+
+  @override
+  void dispose() {
+    _focusNode
+      ..removeListener(_handleFocusChange)
+      ..dispose();
+    _textController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final style = _StepperStyle.resolve(context, widget);
+    final canDecrease = !_disabled && _stepBase > _effectiveMin;
+    final canIncrease = !_disabled && _stepBase < _effectiveMax;
+    final spacing = style.variant == TStepperVariant.outline
+        ? 0.0
+        : style.spacing;
+
+    return Semantics(
+      container: true,
+      enabled: !_disabled,
+      value: _format(widget.value),
+      child: TextFieldTapRegion(
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _StepperButton(
+              icon: TIcons.minus,
+              semanticLabel: '减少',
+              position: _StepperButtonPosition.leading,
+              style: style,
+              globallyDisabled: _disabled,
+              actionDisabled: !canDecrease,
+              onPressed: () => _stepBy(-widget.step),
+            ),
+            SizedBox(width: spacing),
+            _buildInput(style),
+            SizedBox(width: spacing),
+            _StepperButton(
+              icon: TIcons.plus,
+              semanticLabel: '增加',
+              position: _StepperButtonPosition.trailing,
+              style: style,
+              globallyDisabled: _disabled,
+              actionDisabled: !canIncrease,
+              onPressed: () => _stepBy(widget.step),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInput(_StepperStyle style) {
+    final globallyDisabled = _disabled;
+    final inputTextStyle = globallyDisabled
+        ? style.disabledTextStyle
+        : style.textStyle;
+    final backgroundColor = switch (style.variant) {
+      TStepperVariant.normal => Colors.transparent,
+      TStepperVariant.filled =>
+        globallyDisabled
+            ? style.disabledBackgroundColor
+            : style.backgroundColor,
+      TStepperVariant.outline =>
+        globallyDisabled ? style.disabledBackgroundColor : Colors.transparent,
+    };
+    final border = style.variant == TStepperVariant.outline
+        ? Border(
+            top: BorderSide(color: style.borderColor, width: style.borderWidth),
+            bottom: BorderSide(
+              color: style.borderColor,
+              width: style.borderWidth,
+            ),
+          )
+        : null;
+
+    return SizedBox(
+      width: style.inputWidth,
+      height: style.controlSize,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: backgroundColor,
+          border: border,
+          borderRadius: style.variant == TStepperVariant.outline
+              ? null
+              : style.borderRadius,
+        ),
+        child: IgnorePointer(
+          ignoring: globallyDisabled,
+          child: Center(
+            child: EditableText(
+              controller: _textController,
+              focusNode: _focusNode,
+              readOnly: globallyDisabled,
+              autocorrect: false,
+              enableSuggestions: false,
+              maxLines: 1,
+              textAlign: TextAlign.center,
+              strutStyle: StrutStyle.fromTextStyle(
+                inputTextStyle,
+                forceStrutHeight: true,
+              ),
+              keyboardType: TextInputType.numberWithOptions(
+                decimal: true,
+                signed: _effectiveMin < 0,
+              ),
+              style: inputTextStyle,
+              cursorColor: style.foregroundColor,
+              backgroundCursorColor: style.disabledForegroundColor,
+              inputFormatters: [
+                TextInputFormatter.withFunction((oldValue, newValue) {
+                  return RegExp(r'^-?\d*\.?\d*$').hasMatch(newValue.text)
+                      ? newValue
+                      : oldValue;
+                }),
+              ],
+              onChanged: (_) => setState(() => _editing = true),
+              onSubmitted: (_) => _submitDraft(unfocus: true),
+              onTapOutside: (_) => _submitDraft(unfocus: true),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _handleFocusChange() {
+    if (!_focusNode.hasFocus && _editing) {
+      _submitDraft(unfocus: false);
+    }
+  }
+
+  void _stepBy(num delta) {
+    final base = _stepBase;
+    _requestChange(_normalizeStepResult(base + delta, base), unfocus: true);
+  }
+
+  void _submitDraft({required bool unfocus}) {
+    final parsed = num.tryParse(_textController.text);
+    if (parsed == null) {
+      setState(() => _editing = false);
+      _setText(widget.value);
+      if (unfocus) {
+        _focusNode.unfocus();
+      }
+      return;
+    }
+    _requestChange(parsed, unfocus: unfocus);
+  }
+
+  void _requestChange(num next, {required bool unfocus}) {
+    final clamped = next.clamp(_effectiveMin, _effectiveMax);
+    setState(() => _editing = false);
+    if (unfocus) {
+      _focusNode.unfocus();
+    }
+    if (clamped == widget.value) {
+      _setText(widget.value);
+      return;
+    }
+
+    widget.onChanged?.call(clamped);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !_focusNode.hasFocus) {
+        _setText(widget.value);
+      }
+    });
+  }
+
+  num _normalizeStepResult(num value, num base) {
+    final precision = [
+      _decimalPlaces(widget.step),
+      _decimalPlaces(base),
+      _decimalPlaces(widget.min),
+      _decimalPlaces(widget.max),
+    ].reduce(math.max).clamp(0, 12);
+    if (precision == 0) {
+      return value.round();
+    }
+    final rounded = double.parse(value.toStringAsFixed(precision));
+    return rounded % 1 == 0 ? rounded.toInt() : rounded;
+  }
+
+  int _decimalPlaces(num value) {
+    final text = value.abs().toString().toLowerCase();
+    final exponentIndex = text.indexOf('e');
+    final mantissa = exponentIndex == -1
+        ? text
+        : text.substring(0, exponentIndex);
+    final exponent = exponentIndex == -1
+        ? 0
+        : int.tryParse(text.substring(exponentIndex + 1)) ?? 0;
+    final decimalIndex = mantissa.indexOf('.');
+    final decimals = decimalIndex == -1
+        ? 0
+        : mantissa.length - decimalIndex - 1;
+    return math.max(0, decimals - exponent);
+  }
+
+  void _setText(num value) {
+    final text = _format(value);
+    _textController.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
+  }
+
+  String _format(num value) {
+    if (value is int) {
+      return value.toString();
+    }
+    return value % 1 == 0 ? value.toInt().toString() : value.toString();
+  }
+}
+
+enum _StepperButtonPosition { leading, trailing }
+
+class _StepperButton extends StatelessWidget {
+  const _StepperButton({
+    required this.icon,
+    required this.semanticLabel,
+    required this.position,
+    required this.style,
+    required this.globallyDisabled,
+    required this.actionDisabled,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String semanticLabel;
+  final _StepperButtonPosition position;
+  final _StepperStyle style;
+  final bool globallyDisabled;
+  final bool actionDisabled;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final disabled = globallyDisabled || actionDisabled;
+    final backgroundColor = switch (style.variant) {
+      TStepperVariant.normal => Colors.transparent,
+      TStepperVariant.filled =>
+        globallyDisabled
+            ? style.disabledBackgroundColor
+            : style.backgroundColor,
+      TStepperVariant.outline =>
+        globallyDisabled ? style.disabledBackgroundColor : Colors.transparent,
+    };
+    final border = style.variant == TStepperVariant.outline
+        ? Border.all(color: style.borderColor, width: style.borderWidth)
+        : null;
+    final borderRadius = style.variant == TStepperVariant.outline
+        ? BorderRadius.only(
+            topLeft: position == _StepperButtonPosition.leading
+                ? style.borderRadius.topLeft
+                : Radius.zero,
+            bottomLeft: position == _StepperButtonPosition.leading
+                ? style.borderRadius.bottomLeft
+                : Radius.zero,
+            topRight: position == _StepperButtonPosition.trailing
+                ? style.borderRadius.topRight
+                : Radius.zero,
+            bottomRight: position == _StepperButtonPosition.trailing
+                ? style.borderRadius.bottomRight
+                : Radius.zero,
+          )
+        : style.borderRadius;
+
+    return Semantics(
+      button: true,
+      label: semanticLabel,
+      enabled: !disabled,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: disabled ? null : onPressed,
+        child: SizedBox.square(
+          dimension: style.controlSize,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: backgroundColor,
+              border: border,
+              borderRadius: borderRadius,
+            ),
+            child: Center(
+              child: TInternalIcon(
+                icon,
+                size: style.iconSize,
+                color: disabled
+                    ? style.disabledForegroundColor
+                    : style.iconColor,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StepperStyle {
+  static _StepperStyle _lerp(_StepperStyle a, _StepperStyle b, double t) {
+    return _StepperStyle(
+      variant: t < 0.5 ? a.variant : b.variant,
+      controlSize: a.controlSize + (b.controlSize - a.controlSize) * t,
+      inputWidth: a.inputWidth + (b.inputWidth - a.inputWidth) * t,
+      iconSize: a.iconSize + (b.iconSize - a.iconSize) * t,
+      spacing: a.spacing + (b.spacing - a.spacing) * t,
+      borderWidth: a.borderWidth + (b.borderWidth - a.borderWidth) * t,
+      borderRadius: BorderRadius.lerp(a.borderRadius, b.borderRadius, t)!,
+      foregroundColor: Color.lerp(a.foregroundColor, b.foregroundColor, t)!,
+      disabledForegroundColor: Color.lerp(
+        a.disabledForegroundColor,
+        b.disabledForegroundColor,
+        t,
+      )!,
+      iconColor: Color.lerp(a.iconColor, b.iconColor, t)!,
+      backgroundColor: Color.lerp(a.backgroundColor, b.backgroundColor, t)!,
+      disabledBackgroundColor: Color.lerp(
+        a.disabledBackgroundColor,
+        b.disabledBackgroundColor,
+        t,
+      )!,
+      borderColor: Color.lerp(a.borderColor, b.borderColor, t)!,
+      textStyle: TextStyle.lerp(a.textStyle, b.textStyle, t)!,
+      disabledTextStyle: TextStyle.lerp(
+        a.disabledTextStyle,
+        b.disabledTextStyle,
+        t,
+      )!,
+    );
+  }
+
+  const _StepperStyle({
+    required this.variant,
+    required this.controlSize,
+    required this.inputWidth,
+    required this.iconSize,
+    required this.spacing,
+    required this.borderRadius,
+    required this.borderWidth,
+    required this.foregroundColor,
+    required this.disabledForegroundColor,
+    required this.iconColor,
+    required this.backgroundColor,
+    required this.disabledBackgroundColor,
+    required this.borderColor,
+    required this.textStyle,
+    required this.disabledTextStyle,
+  });
+
+  final TStepperVariant variant;
+  final double controlSize;
+  final double inputWidth;
+  final double iconSize;
+  final double spacing;
+  final BorderRadius borderRadius;
+  final double borderWidth;
+  final Color foregroundColor;
+  final Color disabledForegroundColor;
+  final Color iconColor;
+  final Color backgroundColor;
+  final Color disabledBackgroundColor;
+  final Color borderColor;
+  final TextStyle textStyle;
+  final TextStyle disabledTextStyle;
+
+  static _StepperStyle resolve(BuildContext context, TStepper widget) {
+    final style = _resolveTheme(
+      context,
+      widget,
+      Theme.of(context).extension<TStepperThemeData>(),
+    );
+    assert(_debugTextGeometryFits(style));
+    return style;
+  }
+
+  static bool _debugTextGeometryFits(_StepperStyle style) {
+    final fontSize = style.textStyle.fontSize!;
+    final lineHeight = fontSize * style.textStyle.height!;
+    assert(
+      fontSize <= style.controlSize,
+      'TStepper resolved fontSize ($fontSize) must not exceed '
+      'controlSize (${style.controlSize}).',
+    );
+    assert(
+      lineHeight <= style.controlSize,
+      'TStepper resolved text line height ($lineHeight) must not exceed '
+      'controlSize (${style.controlSize}).',
+    );
+    return true;
+  }
+
+  /// Flutter 的 [TextStyle.merge] 会在覆盖样式未设置 `package` 时保留底层
+  /// 样式的私有 package。把公开字体族（已包含 package 前缀）重新构造成不
+  /// 携带私有 package 的样式，确保更高优先级的字体族不会被错误归入旧包。
+  static TextStyle _flattenFontPackage(TextStyle style) {
+    return TextStyle(
+      inherit: style.inherit,
+      color: style.color,
+      backgroundColor: style.backgroundColor,
+      fontSize: style.fontSize,
+      fontWeight: style.fontWeight,
+      fontStyle: style.fontStyle,
+      letterSpacing: style.letterSpacing,
+      wordSpacing: style.wordSpacing,
+      textBaseline: style.textBaseline,
+      height: style.height,
+      leadingDistribution: style.leadingDistribution,
+      locale: style.locale,
+      foreground: style.foreground,
+      background: style.background,
+      shadows: style.shadows,
+      fontFeatures: style.fontFeatures,
+      fontVariations: style.fontVariations,
+      decoration: style.decoration,
+      decorationColor: style.decorationColor,
+      decorationStyle: style.decorationStyle,
+      decorationThickness: style.decorationThickness,
+      debugLabel: style.debugLabel,
+      fontFamily: style.fontFamily,
+      fontFamilyFallback: style.fontFamilyFallback,
+      overflow: style.overflow,
+    );
+  }
+
+  static _StepperStyle _resolveTheme(
+    BuildContext context,
+    TStepper widget,
+    TStepperThemeData? componentTheme,
+  ) {
+    if (componentTheme is StepperThemeInterpolation) {
+      return _lerp(
+        _resolveTheme(context, widget, componentTheme.begin),
+        _resolveTheme(context, widget, componentTheme.end),
+        componentTheme.progress,
+      );
+    }
+    final token = context.tTheme;
+    final size = widget.size ?? TStepperSize.medium;
+    final variant = widget.variant ?? TStepperVariant.normal;
+    final baseGeometry = stepperGeometry(size);
+    final font = switch (size) {
+      TStepperSize.small => token.fontBodyExtraSmall,
+      TStepperSize.medium => token.fontBodySmall,
+      TStepperSize.large => token.fontBodyLarge,
+    };
+    final geometry = (
+      controlSize: baseGeometry.controlSize,
+      inputWidth: baseGeometry.inputWidth,
+      iconSize: baseGeometry.iconSize,
+      fontSize: font?.size ?? baseGeometry.fontSize,
+      lineHeight: font == null
+          ? baseGeometry.lineHeight
+          : font.size * font.height,
+    );
+    var controlSize = componentTheme?.controlSize ?? geometry.controlSize;
+    final grows =
+        componentTheme?.controlSize == null &&
+        (widget.size == null || geometry.fontSize > geometry.controlSize);
+    final rawComponentTextStyle = componentTheme?.textStyle;
+    final componentTextStyle = rawComponentTextStyle == null
+        ? null
+        : _flattenFontPackage(rawComponentTextStyle);
+    // Flutter asset used by Stepper.
+    const resolvedNumberFontFamily = 'packages/tdesign_flutter/TCloudNumber';
+    final foregroundColor =
+        componentTheme?.foregroundColor ?? token.textColorPrimary;
+    final disabledForegroundColor =
+        componentTheme?.disabledForegroundColor ?? token.textColorDisabled;
+    final themedTextStyle = const TextStyle()
+        .copyWith(
+          fontSize: geometry.fontSize,
+          color: foregroundColor,
+          fontFamily: resolvedNumberFontFamily,
+          letterSpacing: 0,
+        )
+        .merge(componentTextStyle);
+    final resolvedFontSize = themedTextStyle.fontSize ?? geometry.fontSize;
+    final explicitTextHeight = componentTheme?.textStyle?.height;
+    final resolvedLineHeight = grows && resolvedFontSize > controlSize
+        ? math.max(geometry.lineHeight, resolvedFontSize)
+        : math.min(geometry.lineHeight, controlSize);
+    final textStyle = themedTextStyle.copyWith(
+      fontSize: resolvedFontSize,
+      // Figma 的三档文字分别使用 10/16、12/20、16/24 行盒。Theme 只覆盖
+      // 字号时，按最终字号重新计算倍数；控件高度变小时则收敛到可用高度，
+      // 避免保留基于默认字号计算的旧倍数而裁切文字和光标。
+      height: explicitTextHeight ?? resolvedLineHeight / resolvedFontSize,
+      // 将额外行高均分到字形上下，避免 Android 按字体 ascent/descent
+      // 比例分配 leading 后产生视觉上移。
+      leadingDistribution:
+          componentTheme?.textStyle?.leadingDistribution ??
+          TextLeadingDistribution.even,
+    );
+    final scaler = MediaQuery.textScalerOf(context);
+    if (grows) {
+      controlSize = math.max(
+        controlSize,
+        math.max(resolvedFontSize, resolvedFontSize * textStyle.height!),
+      );
+      controlSize = math.max(
+        controlSize,
+        math.max(
+          scaler.scale(resolvedFontSize),
+          scaler.scale(resolvedFontSize) * textStyle.height!,
+        ),
+      );
+    }
+    final widthGrowth = grows
+        ? math.max(1.0, scaler.scale(resolvedFontSize) / resolvedFontSize)
+        : 1.0;
+    final borderColor = componentTheme?.borderColor ?? token.componentBorder;
+
+    return _StepperStyle(
+      variant: variant,
+      controlSize: controlSize,
+      inputWidth:
+          componentTheme?.inputWidth ?? geometry.inputWidth * widthGrowth,
+      iconSize: componentTheme?.iconSize ?? geometry.iconSize,
+      spacing: componentTheme?.spacing ?? token.size2,
+      borderRadius:
+          componentTheme?.borderRadius ??
+          BorderRadius.circular(token.radiusSmall),
+      borderWidth: componentTheme?.borderWidth ?? stepperBorderWidth,
+      foregroundColor: foregroundColor,
+      disabledForegroundColor: disabledForegroundColor,
+      iconColor: foregroundColor,
+      backgroundColor:
+          componentTheme?.backgroundColor ?? token.bgColorSecondaryContainer,
+      disabledBackgroundColor:
+          componentTheme?.disabledBackgroundColor ??
+          token.bgColorComponentDisabled,
+      borderColor: borderColor,
+      textStyle: textStyle,
+      disabledTextStyle: textStyle.copyWith(color: disabledForegroundColor),
+    );
+  }
+}

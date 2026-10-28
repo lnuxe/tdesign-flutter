@@ -1,0 +1,285 @@
+import 'package:flutter/material.dart';
+
+import '../../theme/t_colors.dart';
+import '../../theme/t_theme.dart';
+import '../../util/iterable_ext.dart';
+import '../text/t_text_resolve.dart';
+import '../text/t_text_style_scope.dart';
+import '../text/t_text_styled.dart';
+import 't_calendar_style.dart';
+import 't_calendar_types.dart';
+
+export 't_calendar_types.dart' show DateSelectType;
+
+/// 副标题构建上下文：告知 [TCalendarSubtitleBuilder] 当前渲染哪一格。
+class TCalendarSubtitleContext {
+  const TCalendarSubtitleContext({
+    required this.date,
+    required this.selectType,
+  });
+
+  /// 当前格子的阳历日期（仅年月日，无时分秒）。
+  final DateTime date;
+
+  /// 当前格的选中/区间/禁用等展示状态，便于按态设置副标题样式。
+  final DateSelectType selectType;
+}
+
+/// 副标题构建器；每个日期格渲染时调用一次。
+///
+/// 通过 [TCalendarSubtitleContext] 获取日期与选中态。
+///
+/// ```dart
+/// subtitleBuilder: (context, ctx) {
+///   final text = lunarLabel(ctx.date);
+///   if (text == null) return null;
+///   return Text(text, style: const TextStyle(fontSize: 9));
+/// },
+/// ```
+/// [context] 日期格的构建上下文。
+/// [subtitleContext] 当前日期及日期格的选中、区间和禁用状态。
+///
+/// ## 返回值
+/// 日期格副标题内容；返回 null 时不显示副标题行。
+typedef TCalendarSubtitleBuilder =
+    Widget? Function(
+      BuildContext context,
+      TCalendarSubtitleContext subtitleContext,
+    );
+
+/// 整格自定义构建器。
+/// [context] 日期格的构建上下文。
+/// [cell] 当前日期格的数据与状态。
+///
+/// ## 返回值
+/// 完整日期格内容，包含主数字与副标题；返回 null 时使用默认日期格及副标题。
+typedef TCalendarCellBuilder =
+    Widget? Function(BuildContext context, TCalendarCellModel cell);
+
+/// 月标题构建器。
+/// [context] 月份标题的构建上下文。
+/// [monthDate] 当前月份的第一天。
+///
+/// ## 返回值
+/// 当前月份的标题内容。
+typedef TCalendarMonthTitleBuilder =
+    Widget Function(BuildContext context, DateTime monthDate);
+
+/// 单个日期格的不可变展示快照，由日历的受控 value 派生。
+///
+/// 自定义构建器通过 [selectType] 读取状态；选择更新由日历的 onChanged
+/// 通知调用方，再通过 value 重建，不直接修改日期格。
+@immutable
+class TCalendarCellModel {
+  const TCalendarCellModel({
+    required this.date,
+    required this.selectType,
+    required this.isLastDayOfMonth,
+  });
+
+  /// 当前日期。
+  final DateTime date;
+
+  /// 当前格的选中、区间或禁用展示状态。
+  final DateSelectType selectType;
+
+  /// 是否为当月最后一天。
+  final bool isLastDayOfMonth;
+}
+
+/// 单个日历日期格。
+///
+/// 默认渲染日期与副标题；可通过日历的 cell builder 覆盖整格内容。
+class TCalendarCell extends StatefulWidget {
+  const TCalendarCell({
+    Key? key,
+    this.cell,
+    this.onTap,
+    required this.height,
+    required this.padding,
+    required this.rowIndex,
+    required this.colIndex,
+    required this.dateList,
+    this.cellBuilder,
+    this.subtitleBuilder,
+    this.dayStyle,
+    this.todayDayStyle,
+    this.subtitleStyle,
+    this.cellDecoration,
+    this.centreColor,
+  }) : super(key: key);
+
+  final TCalendarCellModel? cell;
+
+  final void Function(TCalendarCellModel cell)? onTap;
+
+  final double height;
+  final double padding;
+  final int rowIndex;
+  final int colIndex;
+  final List<TCalendarCellModel?> dateList;
+  final TCalendarCellBuilder? cellBuilder;
+  final TCalendarSubtitleBuilder? subtitleBuilder;
+  final TextStyle? dayStyle;
+  final TextStyle? todayDayStyle;
+  final TextStyle? subtitleStyle;
+  final BoxDecoration? cellDecoration;
+  final Color? centreColor;
+
+  @override
+  State<TCalendarCell> createState() => _TCalendarCellState();
+}
+
+class _TCalendarCellState extends State<TCalendarCell> {
+  var _isToday = false;
+  var _positionOffset = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _isToday = _checkIsToday();
+  }
+
+  @override
+  void didUpdateWidget(TCalendarCell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.cell != oldWidget.cell) {
+      _isToday = _checkIsToday();
+    }
+  }
+
+  bool _checkIsToday() {
+    final today = DateTime.now();
+    return widget.cell?.date == DateTime(today.year, today.month, today.day);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cell = widget.cell;
+    if (cell == null) {
+      return const SizedBox.shrink();
+    }
+
+    final defaults = TCalendarStyle.generateStyle(context: context);
+    final themedStyle = TCalendarStyle(
+      dayStyle: widget.dayStyle ?? defaults.dayStyle,
+      todayDayStyle: widget.todayDayStyle ?? defaults.todayDayStyle,
+      subtitleStyle: widget.subtitleStyle ?? defaults.subtitleStyle,
+      cellDecoration: widget.cellDecoration,
+      centreColor: widget.centreColor,
+    ).forSelectType(context, cell.selectType);
+    final decoration = themedStyle.cellDecoration;
+    final positionColor = _rangeBridgeColor(context, themedStyle, decoration);
+
+    final content =
+        widget.cellBuilder?.call(context, cell) ??
+        _buildDefaultCell(context, cell, themedStyle);
+
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onTap: () => widget.onTap?.call(cell),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          ClipRect(
+            child: Container(
+              width: double.infinity,
+              height: widget.height,
+              decoration: decoration,
+              child: content,
+            ),
+          ),
+          if (widget.colIndex < 6)
+            Positioned(
+              right: -widget.padding - _positionOffset,
+              child: Container(
+                width: widget.padding + 2 * _positionOffset,
+                height: widget.height,
+                color: positionColor,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Color? _rangeBridgeColor(
+    BuildContext context,
+    TCalendarStyle cellStyle,
+    BoxDecoration? decoration,
+  ) {
+    _positionOffset = 0;
+    final bridgeColor = cellStyle.centreColor ?? context.tTheme.brandColorLight;
+    final next = _nextDay();
+    if (widget.cell?.selectType == DateSelectType.start) {
+      if (widget.cell?.isLastDayOfMonth == true) {
+        return null;
+      }
+      if (next?.selectType == DateSelectType.end) {
+        _positionOffset = 1;
+        return decoration?.color;
+      }
+      if (next?.selectType == DateSelectType.centre) {
+        return bridgeColor;
+      }
+    }
+    if (widget.cell?.selectType == DateSelectType.centre) {
+      return bridgeColor;
+    }
+    return null;
+  }
+
+  TCalendarCellModel? _nextDay([int offset = 1]) {
+    final index = widget.rowIndex * 7 + widget.colIndex + offset;
+    return widget.dateList.getOrNull(index);
+  }
+
+  Widget _buildDefaultCell(
+    BuildContext context,
+    TCalendarCellModel cell,
+    TCalendarStyle cellStyle,
+  ) {
+    final dayText = cell.date.day.toString();
+    final dayTextStyle =
+        (_isToday ? cellStyle.todayDayStyle : null) ?? cellStyle.dayStyle;
+
+    final subtitle = _buildSubtitle(context, cell, cellStyle);
+
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        Center(
+          child: TTextStyled(dayText, style: dayTextStyle, centerLeading: true),
+        ),
+        if (subtitle != null)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 4.0,
+            child: Center(child: subtitle),
+          ),
+      ],
+    );
+  }
+
+  Widget? _buildSubtitle(
+    BuildContext context,
+    TCalendarCellModel cell,
+    TCalendarStyle cellStyle,
+  ) {
+    final subtitle = widget.subtitleBuilder?.call(
+      context,
+      TCalendarSubtitleContext(date: cell.date, selectType: cell.selectType),
+    );
+    if (subtitle == null) {
+      return null;
+    }
+    return TTextStyleScope(
+      style: TTextResolve.resolve(
+        context: context,
+        style: cellStyle.subtitleStyle,
+      ),
+      child: subtitle,
+    );
+  }
+}

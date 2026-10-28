@@ -1,0 +1,746 @@
+import 'dart:math' as math;
+
+import 'package:flutter/foundation.dart' show listEquals;
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:tdesign_flutter_icons/tdesign_flutter_icons.dart' show TIcons;
+
+import '../../theme/t_colors.dart';
+import '../../theme/t_fonts.dart';
+import '../../theme/t_internal_material.dart';
+import '../../theme/t_radius.dart';
+import '../../theme/t_spacers.dart';
+import '../../theme/t_theme.dart';
+import '../icon/t_icon.dart';
+import '../text/t_text_styled.dart';
+import '../text/t_text_theme_data.dart';
+import 't_cascader_defaults.dart';
+import 't_cascader_theme_data.dart';
+
+/// 级联选项。
+///
+/// [children] 应按 Flutter Widget 配置的不可变约定使用。数据变化时请创建新的
+/// [TCascaderOption] 和列表，不要原地修改已有列表。
+class TCascaderOption {
+  const TCascaderOption({
+    required this.label,
+    required this.value,
+    this.children = const [],
+    this.disabled = false,
+  });
+
+  /// 展示文案。
+  final String label;
+
+  /// 选项值。
+  final Object? value;
+
+  /// 子选项。
+  final List<TCascaderOption> children;
+
+  /// 是否禁用。
+  final bool disabled;
+}
+
+class TCascader extends StatefulWidget {
+  const TCascader({
+    super.key,
+    required this.options,
+    required this.value,
+    this.onChanged,
+    this.variant = TCascaderVariant.tab,
+    this.placeholder = '请选择',
+    this.subtitles = const [],
+    this.multiple = false,
+    this.multipleValue = const [],
+    this.onMultipleChanged,
+  });
+
+  /// 根选项列表。
+  final List<TCascaderOption> options;
+
+  /// 受控选中路径。
+  final List<Object?> value;
+
+  /// 选中路径变化回调；为 null 时禁用。
+  ///
+  /// 分支点击只发出候选路径；调用方需回写 [value]，组件才会推进活动层级。
+  final ValueChanged<List<Object?>>? onChanged;
+
+  /// 导航展示形态。
+  final TCascaderVariant variant;
+
+  /// 未选择层级的占位文案。
+  final String placeholder;
+
+  /// 各层级的次级标题。
+  ///
+  /// 组件按内部活动层级读取对应内容，因此调用方无需持有或控制层级状态；
+  /// 列表没有对应层级或对应内容为空时不显示次级标题。
+  final List<String> subtitles;
+
+  /// 是否开启多选；开启后叶子选项切换勾选而不推进关闭，[value] 仍驱动层级导航。
+  ///
+  /// 与 Web 端 Cascader 的 multiple 语义一致；默认 false 保持单选行为不变。
+  final bool multiple;
+
+  /// 多选受控路径集合；每个元素是一条根到叶的完整路径。
+  ///
+  /// 仅在 [multiple] 为 true 时生效；路径顺序保持调用方回写顺序，
+  /// 组件内部不重排、不去重（重复路径由调用方维护时勾选态以包含判断为准）。
+  final List<List<Object?>> multipleValue;
+
+  /// 多选勾选变化回调；为 null 时多选面板禁用勾选交互。
+  ///
+  /// 点击叶子选项时发出新的路径集合（原集合追加或移除被点击路径后的完整列表），
+  /// 调用方需回写 [multipleValue] 才会更新勾选态。
+  final ValueChanged<List<List<Object?>>>? onMultipleChanged;
+
+  @override
+  State<TCascader> createState() => _TCascaderState();
+}
+
+class _TCascaderState extends State<TCascader> {
+  late int _activeLevel;
+
+  bool get _enabled => widget.onChanged != null;
+
+  @override
+  void initState() {
+    super.initState();
+    _activeLevel = _initialActiveLevel();
+  }
+
+  @override
+  void didUpdateWidget(covariant TCascader oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!listEquals(oldWidget.value, widget.value) ||
+        oldWidget.options != widget.options) {
+      _activeLevel = _initialActiveLevel();
+    }
+  }
+
+  int _initialActiveLevel() {
+    if (widget.value.isEmpty) {
+      return 0;
+    }
+    final selected = _selectedOptions();
+    if (selected.isEmpty) {
+      return 0;
+    }
+    return selected.isNotEmpty && selected.last.children.isNotEmpty
+        ? selected.length
+        : selected.length - 1;
+  }
+
+  List<TCascaderOption> _selectedOptions() {
+    var options = widget.options;
+    final selected = <TCascaderOption>[];
+    for (final value in widget.value) {
+      final index = options.indexWhere((option) => option.value == value);
+      if (index < 0) {
+        break;
+      }
+      final option = options[index];
+      selected.add(option);
+      options = option.children;
+    }
+    return selected;
+  }
+
+  List<TCascaderOption> _optionsAt(int level) {
+    var options = widget.options;
+    for (var index = 0; index < level; index++) {
+      if (index >= widget.value.length) {
+        return const [];
+      }
+      final selected = options.where(
+        (option) => option.value == widget.value[index],
+      );
+      if (selected.isEmpty) {
+        return const [];
+      }
+      options = selected.first.children;
+    }
+    return options;
+  }
+
+  /// 当前活动层级到根的完整路径前缀（用于构造叶子完整路径）。
+  List<Object?> _pathPrefix() => widget.value.take(_activeLevel).toList();
+
+  bool _isMultiplePathSelected(List<Object?> path) {
+    for (final selected in widget.multipleValue) {
+      if (_pathsEqual(selected, path)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  List<List<Object?>> _toggleMultiplePath(List<Object?> path) {
+    if (_isMultiplePathSelected(path)) {
+      return [
+        for (final selected in widget.multipleValue)
+          if (!_pathsEqual(selected, path)) selected,
+      ];
+    }
+    return [...widget.multipleValue, path];
+  }
+
+  bool _pathsEqual(List<Object?> a, List<Object?> b) {
+    if (a.length != b.length) {
+      return false;
+    }
+    for (var index = 0; index < a.length; index++) {
+      if (!_valueEquals(a[index], b[index])) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  bool _valueEquals(Object? a, Object? b) {
+    if (identical(a, b)) {
+      return true;
+    }
+    return a == b;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final material = Theme.of(context);
+    final theme = material.extension<TCascaderThemeData>();
+    final selected = _selectedOptions();
+    final options = _optionsAt(_activeLevel);
+    final backgroundColor =
+        theme?.backgroundColor ?? context.tTheme.bgColorContainer;
+    final borderRadius = BorderRadius.circular(
+      theme?.borderRadius ?? context.tTheme.radiusDefault,
+    );
+    return Semantics(
+      enabled: _enabled,
+      child: AnimatedOpacity(
+        opacity: _enabled ? 1 : 0.5,
+        duration: const Duration(milliseconds: 150),
+        child: AbsorbPointer(
+          absorbing: !_enabled,
+          child: SizedBox(
+            height: theme?.height ?? defaultCascaderHeight,
+            child: Container(
+              decoration: BoxDecoration(
+                color: backgroundColor,
+                borderRadius: borderRadius,
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final styles = _resolveTextStyles(context, theme);
+                  var rowHeight = 56.0;
+                  for (final style in [
+                    styles.normal,
+                    styles.active,
+                    styles.selected,
+                    styles.disabled,
+                  ]) {
+                    rowHeight = math.max(
+                      rowHeight,
+                      TTextStyled(
+                        '国Ag',
+                        style: style,
+                        centerLeading: true,
+                      ).naturalSize(context).height,
+                    );
+                  }
+                  final bodyReserve = math.min(
+                    rowHeight,
+                    constraints.maxHeight / 2,
+                  );
+                  final navReserve = math.min(
+                    rowHeight,
+                    math.max(0, constraints.maxHeight - bodyReserve - 1),
+                  );
+                  final hasSubtitle =
+                      _activeLevel < widget.subtitles.length &&
+                      widget.subtitles[_activeLevel].isNotEmpty;
+                  var subtitleHeight = 0.0;
+                  if (hasSubtitle) {
+                    final font = context.tTheme.fontBodyMedium;
+                    subtitleHeight =
+                        TTextStyled(
+                              widget.subtitles[_activeLevel],
+                              style: TextStyle(
+                                fontSize: font?.size,
+                                height: font?.height,
+                                fontWeight: font?.fontWeight,
+                              ),
+                            )
+                            .naturalSize(
+                              context,
+                              maxWidth: math.max(
+                                0,
+                                constraints.maxWidth -
+                                    context.tTheme.spacer2 * 2,
+                              ),
+                            )
+                            .height +
+                        20 +
+                        context.tTheme.spacer;
+                    subtitleHeight = math.min(
+                      subtitleHeight,
+                      math.max(
+                        0,
+                        constraints.maxHeight - bodyReserve - navReserve - 1,
+                      ),
+                    );
+                  }
+                  final navHeight = math.max(
+                    0.0,
+                    constraints.maxHeight - bodyReserve - subtitleHeight - 1,
+                  );
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ConstrainedBox(
+                        constraints: BoxConstraints(maxHeight: navHeight),
+                        child: TInternalScrollScope(
+                          child: SingleChildScrollView(
+                            child: _buildNavigation(context, selected, theme),
+                          ),
+                        ),
+                      ),
+                      TInternalDivider(
+                        height: 1,
+                        thickness: 1,
+                        color:
+                            theme?.dividerColor ??
+                            context.tTheme.componentStroke,
+                      ),
+                      if (hasSubtitle)
+                        ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxHeight: subtitleHeight,
+                          ),
+                          child: TInternalScrollScope(
+                            child: SingleChildScrollView(
+                              child: _buildSubtitle(context),
+                            ),
+                          ),
+                        ),
+                      Expanded(
+                        child: TInternalScrollScope(
+                          child: ListView.builder(
+                            padding: EdgeInsets.zero,
+                            itemCount: options.length,
+                            itemBuilder: (context, index) =>
+                                _buildOption(context, options[index], theme),
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNavigation(
+    BuildContext context,
+    List<TCascaderOption> selected,
+    TCascaderThemeData? theme,
+  ) {
+    final styles = _resolveTextStyles(context, theme);
+    final activeColor = styles.active.color ?? context.tTheme.brandColor;
+    final entries = <_CascaderNavigationEntry>[
+      for (var index = 0; index < selected.length; index++)
+        _CascaderNavigationEntry(
+          label: selected[index].label,
+          selected: true,
+          active: index == _activeLevel,
+          enabled: _enabled,
+          onTap: () => setState(() => _activeLevel = index),
+        ),
+      if (selected.isEmpty || selected.last.children.isNotEmpty)
+        _CascaderNavigationEntry(
+          label: widget.placeholder,
+          selected: false,
+          active: selected.length == _activeLevel,
+          enabled: _enabled,
+          onTap: () => setState(() => _activeLevel = selected.length),
+        ),
+    ];
+    if (widget.variant == TCascaderVariant.step) {
+      return Padding(
+        padding:
+            theme?.navigationPadding ??
+            EdgeInsets.fromLTRB(
+              context.tTheme.spacer2,
+              0,
+              context.tTheme.spacer2,
+              4.0,
+            ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (var index = 0; index < entries.length; index++)
+              _buildStepNavigationEntry(
+                context,
+                entries[index],
+                styles,
+                activeColor,
+                index,
+                entries.length,
+              ),
+          ],
+        ),
+      );
+    }
+    return TInternalScrollScope(
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        padding: theme?.navigationPadding,
+        child: Row(
+          children: [
+            for (final entry in entries)
+              _buildTabNavigationEntry(context, entry, styles, activeColor),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStepNavigationEntry(
+    BuildContext context,
+    _CascaderNavigationEntry entry,
+    _CascaderTextStyles styles,
+    Color activeColor,
+    int index,
+    int length,
+  ) {
+    return _CascaderPressable(
+      onTap: entry.onTap,
+      enabled: entry.enabled,
+      selected: entry.active,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 44),
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                width: 8,
+                height: 0,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    if (index > 0)
+                      Align(
+                        alignment: Alignment.topCenter,
+                        child: FractionallySizedBox(
+                          heightFactor: .5,
+                          child: Padding(
+                            padding: const EdgeInsets.only(bottom: 4),
+                            child: Container(width: 1, color: activeColor),
+                          ),
+                        ),
+                      ),
+                    if (index < length - 1)
+                      Align(
+                        alignment: Alignment.bottomCenter,
+                        child: FractionallySizedBox(
+                          heightFactor: .5,
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Container(width: 1, color: activeColor),
+                          ),
+                        ),
+                      ),
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: entry.selected
+                            ? activeColor
+                            : context.tTheme.bgColorContainer,
+                        border: Border.all(color: activeColor),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(width: context.tTheme.spacer2),
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: TTextStyled(
+                    entry.label,
+                    centerLeading: true,
+                    style: entry.active ? styles.active : styles.normal,
+                  ),
+                ),
+              ),
+              Center(
+                child: TIcon(
+                  TIcons.chevron_right,
+                  size: 22,
+                  color: context.tTheme.textColorPlaceholder,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTabNavigationEntry(
+    BuildContext context,
+    _CascaderNavigationEntry entry,
+    _CascaderTextStyles styles,
+    Color activeColor,
+  ) {
+    return _CascaderPressable(
+      onTap: entry.onTap,
+      enabled: entry.enabled,
+      selected: entry.active,
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 48),
+        padding: EdgeInsets.symmetric(horizontal: context.tTheme.spacer2),
+        decoration: BoxDecoration(
+          border: entry.active
+              ? Border(bottom: BorderSide(width: 2, color: activeColor))
+              : null,
+        ),
+        child: Align(
+          alignment: Alignment.center,
+          heightFactor: 1,
+          widthFactor: 1,
+          child: TTextStyled(
+            entry.label,
+            centerLeading: true,
+            style: entry.active ? styles.active : styles.normal,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSubtitle(BuildContext context) {
+    final tokenFont = context.tTheme.fontBodyMedium;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        context.tTheme.spacer2,
+        20,
+        context.tTheme.spacer2,
+        context.tTheme.spacer,
+      ),
+      child: TTextStyled(
+        widget.subtitles[_activeLevel],
+        key: const ValueKey('cascader-subtitle'),
+        style: TextStyle(
+          color: context.tTheme.textColorPlaceholder,
+          fontSize: tokenFont?.size,
+          height: tokenFont?.height,
+          fontWeight: tokenFont?.fontWeight,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOption(
+    BuildContext context,
+    TCascaderOption option,
+    TCascaderThemeData? theme,
+  ) {
+    final styles = _resolveTextStyles(context, theme);
+    final selected =
+        _activeLevel < widget.value.length &&
+        widget.value[_activeLevel] == option.value;
+    final isLeaf = option.children.isEmpty;
+    final multipleLeaf = widget.multiple && isLeaf;
+    final leafPath = multipleLeaf ? [..._pathPrefix(), option.value] : null;
+    final checked = multipleLeaf && _isMultiplePathSelected(leafPath!);
+    final multipleEnabled = multipleLeaf && widget.onMultipleChanged != null;
+    final iconColor = context.tTheme.brandColor;
+    final indicatorColor = theme?.indicatorColor ?? iconColor;
+    final VoidCallback? onTap;
+    if (!_enabled || option.disabled) {
+      onTap = null;
+    } else if (multipleLeaf) {
+      onTap = multipleEnabled
+          ? () {
+              final next = _toggleMultiplePath(leafPath!);
+              widget.onMultipleChanged?.call(
+                List.unmodifiable(
+                  next.map(List<Object?>.unmodifiable),
+                ),
+              );
+            }
+          : null;
+    } else {
+      onTap = () {
+        final next = <Object?>[
+          ...widget.value.take(_activeLevel),
+          option.value,
+        ];
+        widget.onChanged?.call(List.unmodifiable(next));
+      };
+    }
+    return _CascaderPressable(
+      pressableKey: ValueKey('cascader-${option.value}'),
+      onTap: onTap,
+      enabled: onTap != null,
+      selected: multipleLeaf ? checked : selected,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 56),
+        child: Padding(
+          padding: EdgeInsets.symmetric(horizontal: context.tTheme.spacer2),
+          child: Row(
+            children: [
+              Expanded(
+                child: TTextStyled(
+                  option.label,
+                  centerLeading: true,
+                  style: option.disabled
+                      ? styles.disabled
+                      : (multipleLeaf ? checked : selected)
+                      ? styles.selected
+                      : styles.normal,
+                ),
+              ),
+              if (multipleLeaf)
+                TIcon(
+                  checked ? TIcons.check_circle_filled : TIcons.circle,
+                  size: 22,
+                  color: option.disabled
+                      ? context.tTheme.brandColorDisabled
+                      : checked
+                      ? indicatorColor
+                      : context.tTheme.componentBorder,
+                )
+              else if (isLeaf && selected)
+                TIcon(TIcons.check, size: 24, color: indicatorColor)
+              else if (!isLeaf)
+                TIcon(
+                  TIcons.chevron_right,
+                  size: 22,
+                  color: context.tTheme.textColorPlaceholder,
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  _CascaderTextStyles _resolveTextStyles(
+    BuildContext context,
+    TCascaderThemeData? theme,
+  ) {
+    final tokenFont = context.tTheme.fontBodyLarge;
+    final textTheme = Theme.of(context).extension<TTextThemeData>();
+    final normal = TextStyle(
+      color: context.tTheme.textColorPrimary,
+      fontSize: tokenFont?.size,
+      height: tokenFont?.height,
+      fontWeight: tokenFont?.fontWeight,
+    ).merge(textTheme?.textStyle).merge(theme?.textStyle);
+    final active = normal
+        .copyWith(color: context.tTheme.brandColor, fontWeight: FontWeight.w600)
+        .merge(theme?.activeTextStyle);
+    final disabled = normal
+        .copyWith(color: context.tTheme.textColorDisabled)
+        .merge(theme?.disabledTextStyle);
+    final selected = normal.merge(theme?.activeTextStyle);
+    return _CascaderTextStyles(
+      normal: normal,
+      active: active,
+      disabled: disabled,
+      selected: selected,
+    );
+  }
+}
+
+class _CascaderPressable extends StatelessWidget {
+  const _CascaderPressable({
+    this.pressableKey,
+    required this.child,
+    required this.onTap,
+    this.enabled = true,
+    this.selected = false,
+  });
+
+  final Key? pressableKey;
+  final Widget child;
+  final VoidCallback? onTap;
+  final bool enabled;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final interactive = enabled && onTap != null;
+    return Semantics(
+      button: true,
+      enabled: interactive,
+      selected: selected,
+      child: FocusableActionDetector(
+        enabled: interactive,
+        mouseCursor: interactive
+            ? SystemMouseCursors.click
+            : SystemMouseCursors.basic,
+        shortcuts: const {
+          SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
+          SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
+        },
+        actions: {
+          ActivateIntent: CallbackAction<ActivateIntent>(
+            onInvoke: (_) {
+              onTap?.call();
+              return null;
+            },
+          ),
+        },
+        child: GestureDetector(
+          key: pressableKey,
+          behavior: HitTestBehavior.opaque,
+          onTap: interactive ? onTap : null,
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+class _CascaderNavigationEntry {
+  const _CascaderNavigationEntry({
+    required this.label,
+    required this.selected,
+    required this.active,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final bool active;
+  final bool enabled;
+  final VoidCallback onTap;
+}
+
+class _CascaderTextStyles {
+  const _CascaderTextStyles({
+    required this.normal,
+    required this.active,
+    required this.disabled,
+    required this.selected,
+  });
+
+  final TextStyle normal;
+  final TextStyle active;
+  final TextStyle disabled;
+  final TextStyle selected;
+}

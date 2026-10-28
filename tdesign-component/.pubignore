@@ -1,0 +1,16 @@
+.dart_tool/
+.packages
+.pub/
+build/
+coverage/
+demo_tool/
+doc/
+test/
+tool/
+pubspec.lock
+pubspec_overrides.yaml
+local_dependency_override.yaml
+analysis_options.yaml
+# The full Demo application and generated documentation assets are maintained
+# in the repository/site and are not part of the runtime component package.
+example/

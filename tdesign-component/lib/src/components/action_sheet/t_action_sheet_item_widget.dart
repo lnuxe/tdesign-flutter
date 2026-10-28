@@ -1,0 +1,243 @@
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show OverflowBoxFit;
+
+import '../../theme/t_colors.dart';
+import '../../theme/t_fonts.dart';
+import '../../theme/t_internal_material.dart';
+import '../../theme/t_spacers.dart';
+import '../../theme/t_theme.dart';
+import '../../util/context_extension.dart';
+import '../badge/t_badge_internal.dart';
+import '../badge/t_badge_layout.dart';
+import '../text/t_text_styled.dart';
+import 't_action_sheet_item.dart';
+import 't_action_sheet_theme_data.dart';
+import 't_action_sheet_types.dart';
+
+const actionSheetCancelButtonHeight = 48.0;
+
+/// 动作面板单个项目组件
+///
+/// 在宫格模式下渲染单个可点击项目，含图标、标签和角标。
+class TActionSheetItemWidget<T> extends StatelessWidget {
+  const TActionSheetItemWidget({
+    super.key,
+    required this.item,
+    this.onSelected,
+  });
+
+  /// 项目数据
+  final TActionSheetItem<T> item;
+
+  /// 选择项目时的回调函数
+  final TActionSheetOnSelected<T>? onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final actionSheetTheme = Theme.of(
+      context,
+    ).extension<TActionSheetThemeData>();
+    final iconSize = actionSheetTheme?.iconSize ?? 24;
+    final iconExtent = actionSheetTheme?.gridIconExtent ?? 40;
+    final iconColor = item.disabled
+        ? context.tTheme.textColorDisabled
+        : (actionSheetTheme?.iconColor ?? context.tTheme.textColorPrimary);
+    final content = GestureDetector(
+      onTap: item.disabled
+          ? null
+          : () {
+              onSelected?.call(item);
+              Navigator.maybePop(context);
+            },
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final labelHeight = actionSheetGridLabel(
+            context,
+            item,
+          ).naturalSize(context).height;
+          final contentHeight = item.icon == null
+              ? labelHeight
+              : iconExtent + context.tTheme.spacer + labelHeight;
+          final availableSpacing = constraints.maxHeight.isFinite
+              ? math.max(0.0, constraints.maxHeight - contentHeight)
+              : context.tTheme.spacer2;
+          final topSpacing =
+              availableSpacing >=
+                  context.tTheme.spacer2 + context.tTheme.spacer1
+              ? context.tTheme.spacer2
+              : availableSpacing / 2;
+          return Padding(
+            padding: EdgeInsets.only(
+              left: context.tTheme.spacer,
+              top: topSpacing,
+              right: context.tTheme.spacer,
+            ),
+            child: OverflowBox(
+              fit: OverflowBoxFit.deferToChild,
+              minHeight: 0,
+              maxHeight: double.infinity,
+              alignment: Alignment.topCenter,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.start,
+                children: [
+                  if (item.icon != null) ...[
+                    _buildIcon(context, iconColor, iconSize, iconExtent),
+                    SizedBox(height: context.tTheme.spacer),
+                  ],
+                  actionSheetGridLabel(context, item),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+    if (!item.disabled) {
+      return content;
+    }
+    return Semantics(
+      enabled: false,
+      child: Opacity(opacity: 0.4, child: content),
+    );
+  }
+
+  Widget _buildIcon(
+    BuildContext context,
+    Color iconColor,
+    double iconSize,
+    double iconExtent,
+  ) {
+    final icon = TInternalIconTheme(
+      data: IconThemeData(color: iconColor, size: iconSize),
+      child: SizedBox(
+        width: iconExtent,
+        height: iconExtent,
+        child: Center(child: item.icon!),
+      ),
+    );
+    final badge = item.badge;
+    return badge == null
+        ? icon
+        : TBadgeFromConfig(
+            config: badge,
+            child: icon,
+            fallbackAlignment: AlignmentDirectional.topEnd,
+            fallbackOffset: resolveBadgeFallbackOffset(
+              context,
+              const Offset(-2, -1),
+              alignment: badge.alignment,
+              fallbackAlignment: AlignmentDirectional.topEnd,
+            ),
+          );
+  }
+}
+
+/// 获取主轴对齐方式
+MainAxisAlignment getMainAxisAlignment(
+  TActionSheetAlign align, [
+  TextDirection textDirection = TextDirection.ltr,
+]) {
+  switch (align) {
+    case TActionSheetAlign.left:
+      return textDirection == TextDirection.ltr
+          ? MainAxisAlignment.start
+          : MainAxisAlignment.end;
+    case TActionSheetAlign.right:
+      return textDirection == TextDirection.ltr
+          ? MainAxisAlignment.end
+          : MainAxisAlignment.start;
+    case TActionSheetAlign.center:
+      return MainAxisAlignment.center;
+  }
+}
+
+/// 构建取消按钮
+///
+/// [showPagination] 是否显示分页（影响上方间距），
+/// [spacingColor] 取消按钮上方留白的颜色，默认为页面背景色。
+/// [cancelText] 取消按钮文本，[onCancel] 点击回调。
+Widget buildCancelButton(
+  BuildContext context,
+  bool showPagination,
+  String? cancelText,
+  VoidCallback? onCancel, {
+  Color? spacingColor,
+}) {
+  return Container(
+    color: spacingColor ?? context.tTheme.bgColorPage,
+    padding: EdgeInsets.only(
+      top: showPagination ? context.tTheme.spacer2 : context.tTheme.spacer,
+    ),
+    child: GestureDetector(
+      onTap: () {
+        onCancel?.call();
+        Navigator.maybePop(context);
+      },
+      child: Container(
+        decoration: BoxDecoration(
+          color: context.tTheme.bgColorContainer,
+          border: Border(
+            top: BorderSide(color: context.tTheme.componentStroke, width: 0.5),
+          ),
+        ),
+        constraints: const BoxConstraints(
+          minHeight: actionSheetCancelButtonHeight,
+        ),
+        child: Center(
+          heightFactor: 1,
+          child: TTextStyled(
+            cancelText ?? context.resource.cancel,
+            centerLeading: true,
+            font: context.tTheme.fontBodyLarge,
+            style: TextStyle(color: context.tTheme.textColorPrimary),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+// Measurement and rendering share the final TD style, including explicit item styles.
+TTextStyled actionSheetGridLabel<T>(
+  BuildContext context,
+  TActionSheetItem<T> item,
+) => TTextStyled(
+  item.label,
+  font: context.tTheme.fontBodySmall,
+  textColor: context.tTheme.textColorPrimary,
+  style: item.textStyle,
+  maxLines: 1,
+  overflow: TextOverflow.ellipsis,
+);
+
+double actionSheetGridItemHeight<T>(
+  BuildContext context,
+  Iterable<TActionSheetItem<T>> items,
+) {
+  final theme = Theme.of(context).extension<TActionSheetThemeData>();
+  return items.fold<double>(
+    96,
+    (height, item) => math.max(
+      height,
+      actionSheetGridLabel(context, item).naturalSize(context).height +
+          (item.icon == null
+              ? 0
+              : (theme?.gridIconExtent ?? 40) + context.tTheme.spacer) +
+          context.tTheme.spacer2 +
+          context.tTheme.spacer1,
+    ),
+  );
+}
+
+double actionSheetCancelHeight(BuildContext context, String? text) => math.max(
+  actionSheetCancelButtonHeight,
+  TTextStyled(
+    text ?? context.resource.cancel,
+    centerLeading: true,
+    font: context.tTheme.fontBodyLarge,
+    style: TextStyle(color: context.tTheme.textColorPrimary),
+  ).naturalSize(context, maxWidth: MediaQuery.sizeOf(context).width).height,
+);

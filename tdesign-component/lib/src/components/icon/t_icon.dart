@@ -1,0 +1,105 @@
+import 'package:flutter/material.dart';
+import 'package:tdesign_flutter_icons/tdesign_flutter_icons.dart';
+
+import '../../theme/t_colors.dart';
+import '../../theme/t_theme.dart';
+
+/// 仅供 TDesign 组合组件传递已解析的图标外观；不读取外部 Material IconTheme。
+class TIconStyleScope extends InheritedWidget {
+  const TIconStyleScope({
+    super.key,
+    required this.color,
+    required this.size,
+    this.style,
+    required super.child,
+  });
+
+  final Color? color;
+  final double? size;
+  final IconThemeData? style;
+
+  static TIconStyleScope? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<TIconStyleScope>();
+
+  @override
+  bool updateShouldNotify(TIconStyleScope oldWidget) =>
+      color != oldWidget.color ||
+      size != oldWidget.size ||
+      style != oldWidget.style;
+}
+
+class TIcon extends StatelessWidget {
+  /// 要绘制的图标数据，通常使用 `tdesign_flutter_icons` 提供的 `TIcons.xxx`。
+  final IconData icon;
+
+  /// 图标尺寸，单位为逻辑像素。
+  ///
+  /// 未设置时继承 TDesign 组合组件的图标尺寸；独立使用时为 24dp。
+  final double? size;
+
+  /// 图标颜色。
+  ///
+  /// 未设置时继承 TDesign 组合组件的图标颜色；独立使用时读取 `textColorPrimary` Token。
+  final Color? color;
+
+  /// 无障碍语义标签。
+  ///
+  /// 非空时由原生 [Icon] 暴露给辅助技术；为空时图标不单独提供语义节点。
+  final String? semanticLabel;
+
+  const TIcon(
+    this.icon, {
+    super.key,
+    this.size,
+    this.color,
+    this.semanticLabel,
+  });
+
+  /// 通过图标名称构造，并在 [TIcons.allIconsMap] 中查找对应图标。
+  ///
+  /// 如果名称不存在，抛出 [ArgumentError]。
+  factory TIcon.fromName(
+    /// 图标名称，对应 [TIcons.allIconsMap] 中的 key。
+    String name, {
+    Key? key,
+    double? size,
+    Color? color,
+    String? semanticLabel,
+  }) {
+    final iconData = TIcons.allIconsMap[name];
+    if (iconData == null) {
+      throw ArgumentError('Unknown icon name: $name');
+    }
+    return TIcon(
+      iconData,
+      key: key,
+      size: size,
+      color: color,
+      semanticLabel: semanticLabel,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scope = TIconStyleScope.maybeOf(context);
+    final effectiveSize = size ?? scope?.size ?? 24.0;
+    final effectiveColor =
+        color ?? scope?.color ?? context.tTheme.textColorPrimary;
+
+    return IconTheme(
+      data: IconThemeData(opacity: scope?.style?.opacity ?? 1),
+      child: Icon(
+        icon,
+        size: effectiveSize,
+        color: effectiveColor,
+        fill: scope?.style?.fill ?? 0,
+        weight: scope?.style?.weight ?? 400,
+        grade: scope?.style?.grade ?? 0,
+        opticalSize: scope?.style?.opticalSize ?? effectiveSize,
+        shadows: scope?.style?.shadows ?? const [],
+        applyTextScaling: scope?.style?.applyTextScaling ?? false,
+        semanticLabel: semanticLabel,
+      ),
+    );
+  }
+}

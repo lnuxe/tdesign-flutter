@@ -1,0 +1,1923 @@
+import 'dart:io';
+
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:tdesign_flutter/tdesign_flutter.dart';
+
+import '../../helpers/custom_text_slot_test_helpers.dart';
+import '../../helpers/text_slot_regression.dart';
+
+void main() {
+  registerNativeParagraphContractTests(
+    'TabBar custom menu',
+    (child) => TTabBarMenuItem(value: 'value', itemWidget: child),
+    reset: false,
+  );
+  _textSlotRegression();
+  setUpAll(() async {
+    final flutterBin = File(
+      Platform.resolvedExecutable,
+    ).parent.parent.parent.parent.parent;
+    await (FontLoader('Roboto')..addFont(
+          File(
+            '${flutterBin.path}/cache/artifacts/material_fonts/Roboto-Regular.ttf',
+          ).readAsBytes().then(ByteData.sublistView),
+        ))
+        .load();
+    await (FontLoader('TDesignGoldenCJK')..addFont(
+          File(
+            'example/test/fonts/TDesignGoldenCJK-Regular.otf',
+          ).readAsBytes().then(ByteData.sublistView),
+        ))
+        .load();
+  });
+  Widget wrapWithTheme(
+    Widget child, {
+    TTabBarThemeData? tabBarTheme,
+    TThemeData? themeData,
+  }) {
+    return MaterialApp(
+      theme: ThemeData(
+        extensions: [
+          themeData ??
+              TThemeData.defaultData().copyWith(
+                fontFamilyMap: {
+                  'fontFamily': FontFamily(
+                    fontFamily: 'Roboto',
+                    fallback: ['TDesignGoldenCJK'],
+                  ),
+                },
+              ),
+          if (tabBarTheme != null) tabBarTheme,
+        ],
+      ),
+      home: Scaffold(body: child),
+    );
+  }
+
+  List<TTabBarItemConfig> textTabs({List<VoidCallback?>? taps, int count = 3}) {
+    return List.generate(count, (index) {
+      return TTabBarItemConfig(tabText: '标签${index + 1}', onTap: taps?[index]);
+    });
+  }
+
+  List<TTabBarItemConfig> iconTextTabs() {
+    return List.generate(3, (index) {
+      return TTabBarItemConfig(
+        tabText: '标签${index + 1}',
+        selectedIcon: const Icon(Icons.home),
+        unselectedIcon: const Icon(Icons.home_outlined),
+        onTap: () {},
+      );
+    });
+  }
+
+  List<TTabBarItemConfig> iconTabs() {
+    return List.generate(2, (index) {
+      return TTabBarItemConfig(
+        selectedIcon: const Icon(Icons.star),
+        unselectedIcon: const Icon(Icons.star_border),
+        onTap: () {},
+      );
+    });
+  }
+
+  group('TTabBarThemeData', () {
+    test('copyWith and lerp preserve visual fields', () {
+      const data = TTabBarThemeData(barHeight: 56);
+      final copied = data.copyWith(
+        barHeight: 64,
+        selectedBgColor: Colors.red,
+        dividerColor: Colors.green,
+      );
+      expect(copied.barHeight, 64);
+      expect(copied.selectedBgColor, Colors.red);
+      expect(copied.dividerColor, Colors.green);
+
+      const start = TTabBarThemeData(barHeight: 56);
+      const end = TTabBarThemeData(barHeight: 64);
+      expect(start.lerp(end, 0.5).barHeight, 60);
+      expect(start.lerp(null, 0.5), same(start));
+    });
+
+    test('copyWith preserves existing values when omitted', () {
+      const data = TTabBarThemeData(
+        barHeight: 56,
+        selectedBgColor: Colors.red,
+        dividerHeight: 32,
+      );
+      final copied = data.copyWith();
+
+      expect(copied.barHeight, 56);
+      expect(copied.selectedBgColor, Colors.red);
+      expect(copied.dividerHeight, 32);
+    });
+
+    test('lerp keeps runtime defaults and does not synthesize overrides', () {
+      const defaults = TTabBarThemeData();
+      const custom = TTabBarThemeData(
+        barHeight: 64,
+        selectedBgColor: Colors.red,
+        dividerHeight: 40,
+        dividerThickness: 1.5,
+      );
+
+      final early = defaults.lerp(custom, 0.25);
+      expect(early.barHeight, 58);
+      expect(early.dividerHeight, 34);
+      expect(early.dividerThickness, 0.75);
+      expect(early.selectedBgColor, isNull);
+
+      final late = defaults.lerp(custom, 0.75);
+      expect(late.barHeight, 62);
+      expect(late.selectedBgColor, Colors.red);
+
+      final empty = defaults.lerp(const TTabBarThemeData(), 0.5);
+      expect(empty.barHeight, isNull);
+      expect(empty.dividerHeight, isNull);
+      expect(empty.dividerThickness, isNull);
+      expect(empty.selectedBgColor, isNull);
+    });
+
+    testWidgets('inline gap keeps its default through Theme transitions', (
+      tester,
+    ) async {
+      const defaults = TTabBarThemeData();
+      const custom = TTabBarThemeData(barHeight: 64);
+
+      Future<double> renderedGap(TTabBarThemeData theme) async {
+        await tester.pumpWidget(
+          wrapWithTheme(
+            TTabBar(
+              type: TTabBarType.iconText,
+              iconTextLayout: TTabBarIconTextLayout.inline,
+              value: 0,
+              useSafeArea: false,
+              navigationTabs: iconTextTabs(),
+              onChanged: (_) {},
+            ),
+            tabBarTheme: theme,
+          ),
+        );
+        await tester.pumpAndSettle();
+        final icon = tester.getRect(find.byIcon(Icons.home));
+        final label = tester.getRect(find.text('标签1'));
+        return label.left - icon.right;
+      }
+
+      expect(await renderedGap(defaults.lerp(custom, 0.25)), closeTo(4, 1));
+      expect(await renderedGap(defaults.lerp(custom, 0.75)), closeTo(4, 1));
+      expect(await renderedGap(custom.lerp(defaults, 0.25)), closeTo(4, 1));
+      expect(await renderedGap(custom.lerp(defaults, 0.75)), closeTo(4, 1));
+    });
+  });
+
+  group('TTabBar config classes', () {
+    test('content type, item style and bar style are independent', () {
+      expect(TTabBarType.values, hasLength(4));
+      expect(TTabBarItemStyle.values, hasLength(2));
+      expect(TTabBarStyle.values, hasLength(2));
+      expect(
+        TTabBarIndicatorAnimation.values,
+        contains(TTabBarIndicatorAnimation.elastic),
+      );
+    });
+
+    test('item badge and popup config keep constructor data', () {
+      const tabBadge = TBadgeConfig(variant: TBadgeVariant.dot);
+      const tabItem = TTabBarItemConfig(tabText: '消息', badge: tabBadge);
+      expect(tabItem.badge, same(tabBadge));
+
+      const item = TTabBarMenuItem(value: '更多');
+      final popup = TTabBarPopUpBtnConfig(
+        items: [item],
+        onChanged: (_) {},
+        popUpDialogConfig: TTabBarPopUpShapeConfig(popUpWidth: 120),
+      );
+      expect(popup.items.single.value, '更多');
+      expect(popup.popUpDialogConfig?.popUpWidth, 120);
+    });
+
+    testWidgets(
+      'popup menu item uses typography without covering panel color',
+      (tester) async {
+        final token = TThemeData.defaultData();
+        await tester.pumpWidget(
+          wrapWithTheme(const TTabBarMenuItem(value: '更多')),
+        );
+
+        final text = tester.widget<Text>(find.text('更多'));
+        expect(text.style?.fontSize, token.fontBodyLarge?.size);
+
+        final container = tester.widget<Container>(
+          find.byType(Container).first,
+        );
+        final decoration = container.decoration! as BoxDecoration;
+        expect(decoration.color, isNull);
+      },
+    );
+  });
+
+  group('TTabBar widget', () {
+    testWidgets('文字主题按字段覆盖默认值，单项样式优先', (tester) async {
+      final token = TThemeData.defaultData();
+      for (final materialTheme in [false, true]) {
+        final base = TThemeBuilder.light(token);
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: materialTheme
+                ? base.copyWith(
+                    textTheme: const TextTheme(
+                      bodyLarge: TextStyle(fontSize: 21),
+                    ),
+                  )
+                : base.mergeExtension(
+                    const TTextThemeData(textStyle: TextStyle(fontSize: 21)),
+                  ),
+            home: Scaffold(
+              body: TTabBar(
+                type: TTabBarType.text,
+                value: 0,
+                useSafeArea: false,
+                onChanged: (_) {},
+                navigationTabs: const [
+                  TTabBarItemConfig(tabText: '默认选中'),
+                  TTabBarItemConfig(tabText: '默认未选'),
+                  TTabBarItemConfig(
+                    tabText: '局部覆盖',
+                    unselectTabTextStyle: TextStyle(
+                      fontSize: 24,
+                      color: Colors.orange,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+        final selected = tester.widget<Text>(find.text('默认选中')).style!;
+        final unselected = tester.widget<Text>(find.text('默认未选')).style!;
+        final custom = tester.widget<Text>(find.text('局部覆盖')).style!;
+        expect(selected.fontSize, 21);
+        expect(selected.color, token.brandColor);
+        expect(unselected.fontSize, 21);
+        expect(unselected.color, token.textColorPrimary);
+        expect(custom.fontSize, 24);
+        expect(custom.color, Colors.orange);
+      }
+    });
+
+    testWidgets('二级菜单继承局部主题且背景配置不被菜单行覆盖', (tester) async {
+      final localToken = TThemeData.defaultData().copyWith(
+        name: 'popup-local',
+        colorMap: {'bgColorContainer': Colors.purple},
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: TThemeBuilder.light(TThemeData.defaultData()),
+          home: Scaffold(
+            body: Theme(
+              data: TThemeBuilder.light(localToken).mergeExtension(
+                const TTextThemeData(textStyle: TextStyle(fontSize: 21)),
+              ),
+              child: TTabBar(
+                type: TTabBarType.doubleLayer,
+                value: 0,
+                useSafeArea: false,
+                onChanged: (_) {},
+                navigationTabs: [
+                  TTabBarItemConfig(
+                    tabText: '菜单入口',
+                    popUpButtonConfig: TTabBarPopUpBtnConfig(
+                      items: const [TTabBarMenuItem(value: '菜单项')],
+                      onChanged: (_) {},
+                      popUpDialogConfig: TTabBarPopUpShapeConfig(
+                        backgroundColor: Colors.orange,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('菜单入口'));
+      await tester.pumpAndSettle();
+      final menu = find.byType(TTabBarMenuItem);
+      expect(tester.element(menu).tTheme.bgColorContainer, Colors.purple);
+      expect(tester.widget<Text>(find.text('菜单项')).style?.fontSize, 21);
+      final row = tester.widget<Container>(
+        find.descendant(of: menu, matching: find.byType(Container)).first,
+      );
+      expect((row.decoration! as BoxDecoration).color, isNull);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('动画配置切换保持指示器与受控值同步', (tester) async {
+      var value = 0;
+      var animation = TTabBarIndicatorAnimation.none;
+      late StateSetter update;
+      await tester.pumpWidget(
+        wrapWithTheme(
+          StatefulBuilder(
+            builder: (context, setState) {
+              update = setState;
+              return TTabBar(
+                type: TTabBarType.text,
+                value: value,
+                useSafeArea: false,
+                indicatorAnimation: animation,
+                onChanged: (next) => setState(() => value = next),
+                navigationTabs: textTabs(),
+              );
+            },
+          ),
+        ),
+      );
+      Finder indicator() => find
+          .descendant(
+            of: find.byType(TTabBar),
+            matching: find.byWidgetPredicate(
+              (widget) => widget is Positioned && widget.left != null,
+            ),
+          )
+          .first;
+      await tester.tap(find.text('标签3'));
+      await tester.pumpAndSettle();
+      for (final mode in [
+        TTabBarIndicatorAnimation.linear,
+        TTabBarIndicatorAnimation.elastic,
+      ]) {
+        update(() => animation = mode);
+        await tester.pumpAndSettle();
+        expect(
+          tester.getCenter(indicator()).dx,
+          closeTo(tester.getCenter(find.text('标签3')).dx, 2),
+        );
+      }
+      update(() => animation = TTabBarIndicatorAnimation.none);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('标签2'));
+      await tester.pumpAndSettle();
+      update(() => animation = TTabBarIndicatorAnimation.linear);
+      await tester.pumpAndSettle();
+      expect(
+        tester.getCenter(indicator()).dx,
+        closeTo(tester.getCenter(find.text('标签2')).dx, 2),
+      );
+
+      update(() => value = 2);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      final before = tester.getTopLeft(indicator()).dx;
+      update(() => value = 0);
+      await tester.pump();
+      expect(tester.getTopLeft(indicator()).dx, closeTo(before, 0.01));
+      await tester.pumpAndSettle();
+      expect(
+        tester.getCenter(indicator()).dx,
+        closeTo(tester.getCenter(find.text('标签1')).dx, 2),
+      );
+    });
+
+    testWidgets('renders text variant and emits onChanged', (tester) async {
+      var changed = -1;
+      var tapped = false;
+      await tester.pumpWidget(
+        wrapWithTheme(
+          TTabBar(
+            type: TTabBarType.text,
+            value: 0,
+            navigationTabs: textTabs(taps: [null, () => tapped = true, null]),
+            onChanged: (value) => changed = value,
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('标签2'));
+      await tester.pumpAndSettle();
+
+      expect(changed, 1);
+      expect(tapped, isTrue);
+    });
+
+    testWidgets('disabled when onChanged is null', (tester) async {
+      var tapped = false;
+      await tester.pumpWidget(
+        wrapWithTheme(
+          TTabBar(
+            type: TTabBarType.text,
+            value: 0,
+            navigationTabs: textTabs(taps: [() => tapped = true, null, null]),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('标签1'), warnIfMissed: false);
+      await tester.pumpAndSettle();
+
+      expect(tapped, isFalse);
+    });
+
+    testWidgets('renders every content type, item style and bar style', (
+      tester,
+    ) async {
+      for (final type in TTabBarType.values) {
+        for (final itemStyle in TTabBarItemStyle.values) {
+          for (final style in TTabBarStyle.values) {
+            final tabs = switch (type) {
+              TTabBarType.icon => iconTabs(),
+              TTabBarType.iconText => iconTextTabs(),
+              TTabBarType.text || TTabBarType.doubleLayer => textTabs(),
+            };
+            await tester.pumpWidget(
+              wrapWithTheme(
+                TTabBar(
+                  type: type,
+                  itemStyle: itemStyle,
+                  style: style,
+                  value: 0,
+                  navigationTabs: tabs,
+                  onChanged: (_) {},
+                ),
+              ),
+            );
+            expect(find.byType(TTabBar), findsOneWidget);
+          }
+        }
+      }
+    });
+
+    testWidgets('iconText keeps the bottom-bar icon above its text', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          TTabBar(
+            type: TTabBarType.iconText,
+            value: 0,
+            navigationTabs: iconTextTabs(),
+            onChanged: (_) {},
+          ),
+        ),
+      );
+
+      final firstIcon = tester.getCenter(find.byIcon(Icons.home));
+      final firstText = tester.getCenter(find.text('标签1'));
+      expect(firstIcon.dy, lessThan(firstText.dy));
+    });
+
+    testWidgets('inline iconText places icon before text in the same row', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(375, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(
+        wrapWithTheme(
+          TTabBar(
+            type: TTabBarType.iconText,
+            iconTextLayout: TTabBarIconTextLayout.inline,
+            style: TTabBarStyle.capsule,
+            value: 0,
+            useSafeArea: false,
+            navigationTabs: iconTextTabs(),
+            onChanged: (_) {},
+          ),
+        ),
+      );
+
+      final icon = tester.getRect(find.byIcon(Icons.home));
+      final label = tester.getRect(find.text('标签1'));
+      expect(icon.right, lessThan(label.left));
+      expect((icon.center.dy - label.center.dy).abs(), lessThan(1));
+      expect(label.left - icon.right, closeTo(4, 1));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('filled inline iconText follows item width and badge anchor', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(375, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(
+        wrapWithTheme(
+          TTabBar(
+            type: TTabBarType.iconText,
+            iconTextLayout: TTabBarIconTextLayout.inline,
+            value: 0,
+            useSafeArea: false,
+            navigationTabs: List.generate(
+              4,
+              (index) => TTabBarItemConfig(
+                tabText: 'Item',
+                selectedIcon: const Icon(Icons.home),
+                unselectedIcon: const Icon(Icons.home_outlined),
+                badge: index == 0 ? const TBadgeConfig(label: '9') : null,
+              ),
+            ),
+            onChanged: (_) {},
+          ),
+        ),
+      );
+
+      final selected = find.byWidgetPredicate(
+        (widget) =>
+            widget is Container &&
+            widget.decoration is BoxDecoration &&
+            (widget.decoration! as BoxDecoration).color ==
+                const Color(0xFFF2F3FF),
+      );
+      final selectedRect = tester.getRect(selected);
+      final textRect = tester.getRect(find.text('Item').first);
+      final badgeCenter = tester.getCenter(find.text('9'));
+      expect(selectedRect.left, 8);
+      expect(selectedRect.width, closeTo(77.75, 0.01));
+      expect(selectedRect.height, 40);
+      expect(badgeCenter.dx, closeTo(textRect.right, 0.01));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('filled three-item selection uses the design content width', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(375, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(
+        wrapWithTheme(
+          TTabBar(
+            type: TTabBarType.doubleLayer,
+            value: 2,
+            useSafeArea: false,
+            navigationTabs: List.generate(
+              3,
+              (index) => TTabBarItemConfig(tabText: 'Item $index'),
+            ),
+            onChanged: (_) {},
+          ),
+        ),
+      );
+
+      final selected = find.byWidgetPredicate(
+        (widget) =>
+            widget is Container &&
+            widget.decoration is BoxDecoration &&
+            (widget.decoration! as BoxDecoration).color ==
+                const Color(0xFFF2F3FF),
+      );
+      final rect = tester.getRect(selected);
+      expect(rect.left, closeTo(262, 0.01));
+      expect(rect.width, closeTo(101, 0.01));
+      expect(rect.height, 40);
+    });
+
+    testWidgets('capsule renders every configured icon across selection', (
+      tester,
+    ) async {
+      var selected = 0;
+      await tester.pumpWidget(
+        wrapWithTheme(
+          StatefulBuilder(
+            builder: (context, setState) => TTabBar(
+              type: TTabBarType.iconText,
+              style: TTabBarStyle.capsule,
+              value: selected,
+              useSafeArea: false,
+              onChanged: (index) => setState(() => selected = index),
+              navigationTabs: const [
+                TTabBarItemConfig(
+                  tabText: 'First',
+                  selectedIcon: Icon(Icons.check),
+                  unselectedIcon: Icon(Icons.close),
+                ),
+                TTabBarItemConfig(
+                  tabText: 'Second',
+                  selectedIcon: Icon(Icons.star),
+                  unselectedIcon: Icon(Icons.favorite),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      expect(find.byIcon(Icons.check), findsOneWidget);
+      expect(find.byIcon(Icons.favorite), findsOneWidget);
+      await tester.tap(find.text('Second'));
+      await tester.pumpAndSettle();
+      expect(selected, 1);
+      expect(find.byIcon(Icons.close), findsOneWidget);
+      expect(find.byIcon(Icons.star), findsOneWidget);
+      expect(find.byIcon(Icons.check), findsNothing);
+      expect(find.byIcon(Icons.favorite), findsNothing);
+    });
+
+    testWidgets('updates value with none, linear and elastic animations', (
+      tester,
+    ) async {
+      for (final animation in TTabBarIndicatorAnimation.values) {
+        var value = 0;
+        late StateSetter setState;
+        await tester.pumpWidget(
+          wrapWithTheme(
+            StatefulBuilder(
+              builder: (context, setter) {
+                setState = setter;
+                return TTabBar(
+                  type: TTabBarType.text,
+                  value: value,
+                  navigationTabs: textTabs(),
+                  indicatorAnimation: animation,
+                  animationDuration: const Duration(milliseconds: 20),
+                  onChanged: (next) => setState(() => value = next),
+                );
+              },
+            ),
+          ),
+        );
+
+        await tester.tap(find.text('标签3'));
+        await tester.pump(const Duration(milliseconds: 10));
+        await tester.pumpAndSettle();
+        expect(value, 2);
+      }
+    });
+
+    testWidgets('repeated tap, long press and default safe area path', (
+      tester,
+    ) async {
+      var tapCount = 0;
+      var longPressed = false;
+      await tester.pumpWidget(
+        wrapWithTheme(
+          TTabBar(
+            type: TTabBarType.text,
+            value: 0,
+            navigationTabs: [
+              TTabBarItemConfig(
+                tabText: '标签1',
+                allowMultipleTaps: true,
+                onTap: () => tapCount++,
+                onLongPress: () => longPressed = true,
+              ),
+              TTabBarItemConfig(tabText: '标签2', onTap: () {}),
+            ],
+            onChanged: (_) {},
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('标签1'));
+      await tester.longPress(find.text('标签1'));
+      await tester.pumpAndSettle();
+
+      expect(tapCount, 1);
+      expect(longPressed, isTrue);
+    });
+
+    testWidgets('safe area fills only when enabled', (tester) async {
+      Widget buildBar({required bool useSafeArea}) => wrapWithTheme(
+        MediaQuery(
+          data: const MediaQueryData(padding: EdgeInsets.only(bottom: 24)),
+          child: TTabBar(
+            type: TTabBarType.text,
+            value: 0,
+            useSafeArea: useSafeArea,
+            navigationTabs: textTabs(),
+            onChanged: (_) {},
+          ),
+        ),
+      );
+
+      await tester.pumpWidget(buildBar(useSafeArea: true));
+      expect(tester.getSize(find.byType(TTabBar)).height, 80);
+
+      await tester.pumpWidget(buildBar(useSafeArea: false));
+      expect(tester.getSize(find.byType(TTabBar)).height, 56);
+    });
+
+    testWidgets('filled has default top border and capsule has none', (
+      tester,
+    ) async {
+      Future<BorderSide?> topBorder(TTabBarStyle style) async {
+        await tester.pumpWidget(
+          wrapWithTheme(
+            TTabBar(
+              type: TTabBarType.text,
+              style: style,
+              value: 0,
+              useSafeArea: false,
+              navigationTabs: textTabs(),
+              onChanged: (_) {},
+            ),
+          ),
+        );
+        for (final container in tester.widgetList<Container>(
+          find.descendant(
+            of: find.byType(TTabBar),
+            matching: find.byType(Container),
+          ),
+        )) {
+          final decoration = container.foregroundDecoration;
+          if (decoration is BoxDecoration && decoration.border is Border) {
+            return (decoration.border! as Border).top;
+          }
+        }
+        return null;
+      }
+
+      expect((await topBorder(TTabBarStyle.filled))?.width, 0.5);
+      expect(await topBorder(TTabBarStyle.capsule), isNull);
+    });
+
+    testWidgets('expansion panel popup opens and reports selected value', (
+      tester,
+    ) async {
+      String? selected;
+      await tester.pumpWidget(
+        wrapWithTheme(
+          TTabBar(
+            type: TTabBarType.doubleLayer,
+            value: 0,
+            navigationTabs: [
+              TTabBarItemConfig(
+                tabText: '更多',
+                onTap: () {},
+                popUpButtonConfig: TTabBarPopUpBtnConfig(
+                  items: const [
+                    TTabBarMenuItem(value: '选项A'),
+                    TTabBarMenuItem(value: '选项B'),
+                  ],
+                  onChanged: (value) => selected = value,
+                  popUpDialogConfig: TTabBarPopUpShapeConfig(
+                    popUpWidth: 120,
+                    radius: 4,
+                    arrowWidth: 10,
+                    arrowHeight: 6,
+                  ),
+                ),
+              ),
+              TTabBarItemConfig(tabText: '普通', onTap: () {}),
+            ],
+            onChanged: (_) {},
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('更多'));
+      await tester.pumpAndSettle();
+      expect(tester.getSize(find.byType(TTabBarMenuItem).first).width, 120);
+      final panel = tester.widget<CustomPaint>(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is CustomPaint &&
+              widget.painter.runtimeType.toString() == '_TabBarPanelPainter',
+        ),
+      );
+      expect((panel.painter as dynamic).radius, 4);
+      await tester.tap(find.text('选项B'));
+      await tester.pumpAndSettle();
+
+      expect(selected, '选项B');
+    });
+
+    testWidgets('popup defaults to the theme radius', (tester) async {
+      final token = TThemeData.defaultData().copyWith(
+        name: 'tabbar-popup-radius-test',
+        radiusMap: {'radiusDefault': 9},
+      );
+      await tester.pumpWidget(
+        wrapWithTheme(
+          TTabBar(
+            type: TTabBarType.doubleLayer,
+            value: 0,
+            navigationTabs: [
+              TTabBarItemConfig(
+                tabText: '更多',
+                popUpButtonConfig: TTabBarPopUpBtnConfig(
+                  items: const [TTabBarMenuItem(value: '选项A')],
+                  onChanged: (_) {},
+                ),
+              ),
+              const TTabBarItemConfig(tabText: '普通'),
+            ],
+            onChanged: (_) {},
+          ),
+          themeData: token,
+        ),
+      );
+
+      await tester.tap(find.text('更多'));
+      await tester.pumpAndSettle();
+
+      final panel = tester.widget<CustomPaint>(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is CustomPaint &&
+              widget.painter.runtimeType.toString() == '_TabBarPanelPainter',
+        ),
+      );
+      expect((panel.painter as dynamic).radius, 9);
+    });
+
+    testWidgets('double-layer popup keeps the design minimum width', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(375, 812);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(
+        wrapWithTheme(
+          TTabBar(
+            type: TTabBarType.doubleLayer,
+            value: 3,
+            useSafeArea: false,
+            navigationTabs: List.generate(
+              4,
+              (index) => TTabBarItemConfig(
+                tabText: '标签${index + 1}',
+                popUpButtonConfig: index == 3
+                    ? TTabBarPopUpBtnConfig(
+                        items: const [
+                          TTabBarMenuItem(value: '基本信息'),
+                          TTabBarMenuItem(value: '个人主页'),
+                          TTabBarMenuItem(value: '设置'),
+                        ],
+                        onChanged: (_) {},
+                      )
+                    : null,
+              ),
+            ),
+            onChanged: (_) {},
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('标签4'));
+      await tester.pumpAndSettle();
+
+      expect(tester.getSize(find.byType(TTabBarMenuItem).first).width, 107);
+      expect(tester.getSize(find.byType(TTabBarMenuItem).first).height, 48);
+    });
+
+    testWidgets('ink well routes double-layer popup through one tap chain', (
+      tester,
+    ) async {
+      var itemTapCount = 0;
+      var changedCount = 0;
+      String? selected;
+      await tester.pumpWidget(
+        wrapWithTheme(
+          TTabBar(
+            type: TTabBarType.doubleLayer,
+            value: 0,
+            needInkWell: true,
+            navigationTabs: [
+              const TTabBarItemConfig(tabText: '普通'),
+              TTabBarItemConfig(
+                tabText: '更多',
+                onTap: () => itemTapCount++,
+                popUpButtonConfig: TTabBarPopUpBtnConfig(
+                  items: const [TTabBarMenuItem(value: '选项A')],
+                  onChanged: (value) => selected = value,
+                ),
+              ),
+            ],
+            onChanged: (_) => changedCount++,
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('更多'));
+      await tester.pumpAndSettle();
+
+      expect(itemTapCount, 1);
+      expect(changedCount, 1);
+      expect(find.text('选项A'), findsOneWidget);
+
+      await tester.tap(find.text('选项A'));
+      await tester.pumpAndSettle();
+      expect(selected, '选项A');
+    });
+
+    testWidgets('badge uses its own offset and anchors to iconText icon', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          TTabBar(
+            type: TTabBarType.iconText,
+            value: 0,
+            needInkWell: true,
+            navigationTabs: [
+              TTabBarItemConfig(
+                tabText: '消息',
+                selectedIcon: const Icon(Icons.mail),
+                unselectedIcon: const Icon(Icons.mail_outline),
+                badge: const TBadgeConfig(label: '9', offset: Offset(2, 1)),
+                onTap: () {},
+              ),
+              TTabBarItemConfig(
+                tabText: '首页',
+                selectedIcon: const Icon(Icons.home),
+                unselectedIcon: const Icon(Icons.home_outlined),
+                onTap: () {},
+              ),
+            ],
+            onChanged: (_) {},
+          ),
+        ),
+      );
+
+      expect(find.byType(TBadge), findsOneWidget);
+      final badge = tester.widget<TBadge>(find.byType(TBadge));
+      expect(badge.offset, const Offset(2, 1));
+      expect(badge.child, isNotNull);
+      expect(
+        find.descendant(
+          of: find.byType(TBadge),
+          matching: find.byIcon(Icons.mail),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: find.byType(TBadge), matching: find.text('消息')),
+        findsNothing,
+      );
+      final badgeCenter = tester.getCenter(find.text('9'));
+      final iconCenter = tester.getCenter(find.byIcon(Icons.mail));
+      expect(badgeCenter.dx, greaterThan(iconCenter.dx));
+      expect(badgeCenter.dy, lessThan(iconCenter.dy));
+    });
+
+    testWidgets('capsule container keeps the pill design radius', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          TTabBar(
+            type: TTabBarType.text,
+            style: TTabBarStyle.capsule,
+            value: 0,
+            navigationTabs: textTabs(),
+            onChanged: (_) {},
+          ),
+        ),
+      );
+
+      final capsule = tester.widget<Container>(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is Container &&
+              widget.margin == const EdgeInsets.symmetric(horizontal: 16),
+        ),
+      );
+      expect(
+        (capsule.decoration! as ShapeDecoration).shape,
+        RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(
+            TThemeData.defaultData().radiusRound,
+          ),
+        ),
+      );
+      expect(
+        (capsule.decoration! as ShapeDecoration).shadows,
+        TThemeData.defaultData().shadow3,
+      );
+    });
+
+    testWidgets('capsule shadow follows shadow3 token', (tester) async {
+      const capsuleShadow = [
+        BoxShadow(color: Colors.blue, blurRadius: 7, offset: Offset(0, 3)),
+      ];
+      final token = TThemeData.defaultData().copyWith(
+        name: 'tabbar-capsule-shadow-test',
+        shadowMap: {
+          'shadow1': const [BoxShadow(color: Colors.red)],
+          'shadow3': capsuleShadow,
+        },
+      );
+      await tester.pumpWidget(
+        wrapWithTheme(
+          TTabBar(
+            type: TTabBarType.text,
+            style: TTabBarStyle.capsule,
+            value: 0,
+            navigationTabs: textTabs(),
+            onChanged: (_) {},
+          ),
+          themeData: token,
+        ),
+      );
+
+      final capsule = tester.widget<Container>(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is Container &&
+              widget.margin == const EdgeInsets.symmetric(horizontal: 16),
+        ),
+      );
+      expect((capsule.decoration! as ShapeDecoration).shadows, capsuleShadow);
+    });
+
+    testWidgets(
+      'capsule iconText uses design item bounds and centered content',
+      (tester) async {
+        await tester.binding.setSurfaceSize(const Size(375, 800));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        const selectedColor = Color(0xFFF2F3FF);
+        await tester.pumpWidget(
+          wrapWithTheme(
+            TTabBar(
+              type: TTabBarType.iconText,
+              style: TTabBarStyle.capsule,
+              value: 0,
+              useSafeArea: false,
+              onChanged: (_) {},
+              navigationTabs: List.generate(
+                4,
+                (index) => TTabBarItemConfig(
+                  tabText: 'Item',
+                  selectedIcon: const Icon(TIcons.app),
+                  unselectedIcon: const Icon(TIcons.app),
+                  badge: index == 0
+                      ? const TBadgeConfig(variant: TBadgeVariant.dot)
+                      : null,
+                ),
+              ),
+            ),
+          ),
+        );
+
+        final capsule = find.byWidgetPredicate(
+          (widget) =>
+              widget is Container &&
+              widget.margin == const EdgeInsets.symmetric(horizontal: 16),
+        );
+        final selected = find.byWidgetPredicate(
+          (widget) =>
+              widget is Container &&
+              widget.decoration is BoxDecoration &&
+              (widget.decoration! as BoxDecoration).color == selectedColor,
+        );
+        final capsuleFill = find.descendant(
+          of: capsule,
+          matching: find.byWidgetPredicate(
+            (widget) =>
+                widget is DecoratedBox && widget.decoration is ShapeDecoration,
+          ),
+        );
+        final capsuleRect = tester.getRect(capsuleFill.first);
+        final selectedRect = tester.getRect(selected);
+        expect(capsuleRect.left, 16);
+        expect(capsuleRect.width, 343);
+        expect(capsuleRect.height, 56);
+        expect(selectedRect.left, capsuleRect.left + 8);
+        expect(selectedRect.top, capsuleRect.top + 8);
+        expect(selectedRect.width, closeTo(75.75, 0.01));
+        expect(selectedRect.height, 40);
+        expect(find.byType(TBadge), findsOneWidget);
+        expect(find.text('Item'), findsNWidgets(4));
+        final iconCenter = tester.getCenter(find.byIcon(TIcons.app).first);
+        final textCenter = tester.getCenter(find.text('Item').first);
+        final iconRect = tester.getRect(find.byIcon(TIcons.app).first);
+        final textRect = tester.getRect(find.text('Item').first);
+        expect(iconCenter.dx, closeTo(selectedRect.center.dx, 0.01));
+        expect(textCenter.dx, closeTo(selectedRect.center.dx, 0.01));
+        expect(iconRect.top, closeTo(selectedRect.top + 2, 0.01));
+        expect(iconRect.size, const Size(20, 20));
+        expect(textRect.top, closeTo(selectedRect.top + 22, 0.01));
+        expect(textRect.height, 16);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets('icon defaults to 20 while an explicit size wins', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          TTabBar(
+            type: TTabBarType.icon,
+            value: 0,
+            useSafeArea: false,
+            onChanged: (_) {},
+            navigationTabs: const [
+              TTabBarItemConfig(
+                selectedIcon: Icon(TIcons.app, size: 22),
+                unselectedIcon: Icon(TIcons.app, size: 22),
+              ),
+              TTabBarItemConfig(
+                selectedIcon: Icon(TIcons.chat),
+                unselectedIcon: Icon(TIcons.chat),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      expect(tester.getSize(find.byIcon(TIcons.app)), const Size(22, 22));
+      expect(tester.getSize(find.byIcon(TIcons.chat)), const Size(20, 20));
+    });
+
+    testWidgets('capsule animated indicators follow the item spacing', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(375, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      const indicatorColor = Color(0xFFF2F3FF);
+      for (final animation in [
+        TTabBarIndicatorAnimation.linear,
+        TTabBarIndicatorAnimation.elastic,
+      ]) {
+        var selectedIndex = 0;
+        await tester.pumpWidget(
+          wrapWithTheme(
+            StatefulBuilder(
+              builder: (context, setState) => TTabBar(
+                type: TTabBarType.text,
+                style: TTabBarStyle.capsule,
+                value: selectedIndex,
+                useSafeArea: false,
+                indicatorAnimation: animation,
+                onChanged: (index) => setState(() => selectedIndex = index),
+                navigationTabs: List.generate(
+                  4,
+                  (index) => TTabBarItemConfig(tabText: 'Item $index'),
+                ),
+              ),
+            ),
+            tabBarTheme: const TTabBarThemeData(
+              selectedBgColor: indicatorColor,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final indicator = find.byWidgetPredicate(
+          (widget) =>
+              widget is Container &&
+              widget.decoration is BoxDecoration &&
+              (widget.decoration! as BoxDecoration).color == indicatorColor,
+        );
+        expect(tester.getRect(indicator).left, 24);
+        await tester.tap(find.text('Item 1'));
+        await tester.pumpAndSettle();
+        final rect = tester.getRect(indicator);
+        expect(rect.left, closeTo(107.75, 0.01));
+        expect(rect.width, closeTo(75.75, 0.01));
+        expect(rect.height, 40);
+        expect(tester.takeException(), isNull);
+      }
+    });
+
+    testWidgets('iconText default badge anchors to icon top-right', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          TTabBar(
+            type: TTabBarType.iconText,
+            value: 0,
+            navigationTabs: const [
+              TTabBarItemConfig(
+                tabText: '很长的标签文字',
+                selectedIcon: Icon(Icons.mail, size: 20),
+                unselectedIcon: Icon(Icons.mail_outline, size: 20),
+                badge: TBadgeConfig(label: '9'),
+              ),
+              TTabBarItemConfig(
+                tabText: '首页',
+                selectedIcon: Icon(Icons.home, size: 20),
+                unselectedIcon: Icon(Icons.home_outlined, size: 20),
+              ),
+            ],
+            onChanged: (_) {},
+          ),
+        ),
+      );
+
+      final iconRect = tester.getRect(find.byIcon(Icons.mail));
+      final badgeCenter = tester.getCenter(find.text('9'));
+      expect(badgeCenter.dx, closeTo(iconRect.right, 0.01));
+      expect(badgeCenter.dy, closeTo(iconRect.top, 0.01));
+    });
+
+    testWidgets(
+      'text badge uses the shared top-end anchor when no override exists',
+      (tester) async {
+        await tester.pumpWidget(
+          wrapWithTheme(
+            TTabBar(
+              type: TTabBarType.text,
+              value: 0,
+              navigationTabs: const [
+                TTabBarItemConfig(
+                  tabText: '消息',
+                  badge: TBadgeConfig(label: '9'),
+                ),
+                TTabBarItemConfig(tabText: '首页'),
+              ],
+              onChanged: (_) {},
+            ),
+          ),
+        );
+
+        final title = find.text('消息');
+        expect(
+          tester.getCenter(find.text('9')),
+          tester.getTopRight(title) + const Offset(-6, 0),
+        );
+      },
+    );
+
+    testWidgets('text badge default offset follows RTL logical end', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          Directionality(
+            textDirection: TextDirection.rtl,
+            child: TTabBar(
+              type: TTabBarType.text,
+              value: 0,
+              navigationTabs: const [
+                TTabBarItemConfig(
+                  tabText: '消息',
+                  badge: TBadgeConfig(label: '9'),
+                ),
+                TTabBarItemConfig(tabText: '首页'),
+              ],
+              onChanged: (_) {},
+            ),
+          ),
+        ),
+      );
+
+      final title = find.text('消息');
+      expect(
+        tester.getCenter(find.text('9')),
+        tester.getTopLeft(title) + const Offset(6, 0),
+      );
+    });
+
+    testWidgets('explicit badge offset remains physical in RTL', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          Directionality(
+            textDirection: TextDirection.rtl,
+            child: TTabBar(
+              type: TTabBarType.text,
+              value: 0,
+              navigationTabs: const [
+                TTabBarItemConfig(
+                  tabText: '消息',
+                  badge: TBadgeConfig(label: '9', offset: Offset(3, 4)),
+                ),
+                TTabBarItemConfig(tabText: '首页'),
+              ],
+              onChanged: (_) {},
+            ),
+          ),
+        ),
+      );
+
+      expect(
+        tester.getCenter(find.text('9')),
+        tester.getTopLeft(find.text('消息')) + const Offset(3, 4),
+      );
+    });
+
+    testWidgets('physical alignment controls component fallback direction', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          Directionality(
+            textDirection: TextDirection.rtl,
+            child: TTabBar(
+              type: TTabBarType.text,
+              value: 0,
+              navigationTabs: const [
+                TTabBarItemConfig(
+                  tabText: '消息',
+                  badge: TBadgeConfig(
+                    label: '9',
+                    alignment: Alignment.topRight,
+                  ),
+                ),
+                TTabBarItemConfig(tabText: '首页'),
+              ],
+              onChanged: (_) {},
+            ),
+          ),
+        ),
+      );
+
+      expect(
+        tester.getCenter(find.text('9')),
+        tester.getTopRight(find.text('消息')) + const Offset(-6, 0),
+      );
+    });
+
+    testWidgets('Material BadgeTheme alignment 不覆盖 TabBar 逻辑方向', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          BadgeTheme(
+            data: const BadgeThemeData(alignment: Alignment.topRight),
+            child: Directionality(
+              textDirection: TextDirection.rtl,
+              child: TTabBar(
+                type: TTabBarType.text,
+                value: 0,
+                navigationTabs: const [
+                  TTabBarItemConfig(
+                    tabText: '消息',
+                    badge: TBadgeConfig(label: '9'),
+                  ),
+                  TTabBarItemConfig(tabText: '首页'),
+                ],
+                onChanged: (_) {},
+              ),
+            ),
+          ),
+        ),
+      );
+
+      expect(
+        tester.getCenter(find.text('9')),
+        tester.getTopLeft(find.text('消息')) + const Offset(6, 0),
+      );
+    });
+
+    testWidgets('local Material BadgeTheme offset 不覆盖 TabBar 默认值', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          BadgeTheme(
+            data: const BadgeThemeData(offset: Offset(3, 4)),
+            child: TTabBar(
+              type: TTabBarType.text,
+              value: 0,
+              navigationTabs: const [
+                TTabBarItemConfig(
+                  tabText: '消息',
+                  badge: TBadgeConfig(label: '9'),
+                ),
+                TTabBarItemConfig(tabText: '首页'),
+              ],
+              onChanged: (_) {},
+            ),
+          ),
+        ),
+      );
+
+      final badge = tester.widget<TBadge>(find.byType(TBadge));
+      expect(badge.offset, isNull);
+      expect(
+        tester.getCenter(find.text('9')),
+        isNot(tester.getTopRight(find.text('消息')) + const Offset(3, 4)),
+      );
+    });
+
+    testWidgets(
+      'badge ignores Material theme offset without blocking item onTap',
+      (tester) async {
+        var itemTaps = 0;
+        var changedValue = -1;
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: ThemeData(
+              badgeTheme: const BadgeThemeData(offset: Offset(7, 9)),
+              extensions: [TThemeData.defaultData()],
+            ),
+            home: Scaffold(
+              body: TTabBar(
+                type: TTabBarType.text,
+                value: 0,
+                navigationTabs: [
+                  const TTabBarItemConfig(tabText: '首页'),
+                  TTabBarItemConfig(
+                    tabText: '消息',
+                    badge: const TBadgeConfig(label: '1'),
+                    onTap: () => itemTaps++,
+                  ),
+                ],
+                onChanged: (value) => changedValue = value,
+              ),
+            ),
+          ),
+        );
+
+        final materialBadge = tester.widget<Badge>(find.byType(Badge));
+        expect(materialBadge.offset, const Offset(-6, 0));
+
+        await tester.tap(find.text('消息'));
+        await tester.pump();
+        expect(itemTaps, 1);
+        expect(changedValue, 1);
+      },
+    );
+
+    testWidgets('item onTap follows allowMultipleTaps with badge and InkWell', (
+      tester,
+    ) async {
+      var itemTaps = 0;
+      var changedCount = 0;
+      var selectedIndex = 0;
+      await tester.pumpWidget(
+        wrapWithTheme(
+          StatefulBuilder(
+            builder: (context, setState) => TTabBar(
+              type: TTabBarType.text,
+              value: selectedIndex,
+              needInkWell: true,
+              navigationTabs: [
+                TTabBarItemConfig(
+                  tabText: '首页',
+                  badge: const TBadgeConfig(label: '1'),
+                  onTap: () => itemTaps++,
+                ),
+                TTabBarItemConfig(
+                  tabText: '消息',
+                  allowMultipleTaps: true,
+                  badge: const TBadgeConfig(label: '2'),
+                  onTap: () => itemTaps++,
+                ),
+              ],
+              onChanged: (index) {
+                changedCount++;
+                setState(() => selectedIndex = index);
+              },
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('首页'));
+      await tester.pump();
+      expect(itemTaps, 0);
+      expect(changedCount, 0);
+
+      await tester.tap(find.text('消息'));
+      await tester.pump();
+      expect(itemTaps, 1);
+      expect(changedCount, 1);
+
+      await tester.tap(find.text('消息'));
+      await tester.pump();
+      expect(itemTaps, 2);
+      expect(changedCount, 1);
+    });
+
+    testWidgets('ink well routes one tap through one selection callback', (
+      tester,
+    ) async {
+      var itemTapCount = 0;
+      var changedCount = 0;
+      await tester.pumpWidget(
+        wrapWithTheme(
+          TTabBar(
+            type: TTabBarType.text,
+            value: 0,
+            needInkWell: true,
+            navigationTabs: [
+              const TTabBarItemConfig(tabText: '标签1'),
+              TTabBarItemConfig(tabText: '标签2', onTap: () => itemTapCount++),
+            ],
+            onChanged: (_) => changedCount++,
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('标签2'));
+      await tester.pump();
+
+      expect(itemTapCount, 1);
+      expect(changedCount, 1);
+    });
+
+    test('asserts invalid current API inputs', () {
+      expect(
+        () => TTabBar(
+          type: TTabBarType.text,
+          value: 0,
+          navigationTabs: const [],
+          onChanged: (_) {},
+        ),
+        throwsFlutterError,
+      );
+      expect(
+        () => TTabBar(
+          type: TTabBarType.text,
+          value: 0,
+          navigationTabs: [TTabBarItemConfig(onTap: () {})],
+          onChanged: (_) {},
+        ),
+        throwsFlutterError,
+      );
+      expect(
+        () => TTabBar(
+          type: TTabBarType.icon,
+          value: 0,
+          navigationTabs: [TTabBarItemConfig(onTap: () {})],
+          onChanged: (_) {},
+        ),
+        throwsFlutterError,
+      );
+      expect(
+        () => TTabBar(
+          type: TTabBarType.iconText,
+          value: 0,
+          navigationTabs: [TTabBarItemConfig(tabText: 'x', onTap: () {})],
+          onChanged: (_) {},
+        ),
+        throwsFlutterError,
+      );
+      expect(
+        () => TTabBar(
+          type: TTabBarType.text,
+          value: 2,
+          navigationTabs: textTabs(count: 1),
+          onChanged: (_) {},
+        ),
+        throwsFlutterError,
+      );
+      expect(
+        () => TTabBarPopUpBtnConfig(
+          items: const [TTabBarMenuItem(value: 'x')],
+          onChanged: (_) {},
+          popUpDialogConfig: TTabBarPopUpShapeConfig(arrowHeight: 0),
+        ),
+        throwsFlutterError,
+      );
+    });
+
+    testWidgets('theme values and animated indicators render', (tester) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          TTabBar(
+            type: TTabBarType.text,
+            value: 1,
+            navigationTabs: textTabs(),
+            indicatorAnimation: TTabBarIndicatorAnimation.linear,
+            onChanged: (_) {},
+          ),
+          tabBarTheme: const TTabBarThemeData(
+            barHeight: 60,
+            selectedBgColor: Colors.blue,
+            dividerColor: Colors.green,
+          ),
+        ),
+      );
+
+      expect(find.byType(TTabBar), findsOneWidget);
+      expect(tester.getSize(find.byType(TTabBar)).height, 60);
+    });
+
+    testWidgets('behavior parameters belong to the widget instance', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        wrapWithTheme(
+          TTabBar(
+            type: TTabBarType.text,
+            value: 0,
+            navigationTabs: textTabs(),
+            needInkWell: false,
+            animationDuration: const Duration(milliseconds: 20),
+            animationCurve: Curves.linear,
+            onChanged: (_) {},
+          ),
+          tabBarTheme: const TTabBarThemeData(barHeight: 56),
+        ),
+      );
+      expect(find.byType(InkWell), findsNothing);
+    });
+  });
+}
+
+void _textSlotRegression() {
+  testWidgets('slot tabbar custom auto height preserves explicit popup width', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Align(
+            alignment: Alignment.bottomCenter,
+            child: TTabBar(
+              type: TTabBarType.doubleLayer,
+              value: 0,
+              useSafeArea: false,
+              onChanged: (_) {},
+              navigationTabs: [
+                TTabBarItemConfig(
+                  tabText: 'open',
+                  onTap: () {},
+                  popUpButtonConfig: TTabBarPopUpBtnConfig(
+                    onChanged: (_) {},
+                    popUpDialogConfig: TTabBarPopUpShapeConfig(popUpWidth: 790),
+                    items: const [
+                      TTabBarMenuItem(
+                        value: 'custom',
+                        itemWidget: TText('custom'),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    expect(tester.getSize(find.byType(TTabBarMenuItem)).width, 790);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('slot tabbar adaptive row responds to custom content updates', (
+    tester,
+  ) async {
+    late StateSetter update;
+    var height = 30.0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Align(
+            alignment: Alignment.bottomCenter,
+            child: TTabBar(
+              type: TTabBarType.doubleLayer,
+              value: 0,
+              useSafeArea: false,
+              onChanged: (_) {},
+              navigationTabs: [
+                TTabBarItemConfig(
+                  tabText: 'open',
+                  onTap: () {},
+                  popUpButtonConfig: TTabBarPopUpBtnConfig(
+                    onChanged: (_) {},
+                    items: [
+                      TTabBarMenuItem(
+                        value: 'dynamic',
+                        itemWidget: StatefulBuilder(
+                          builder: (context, setState) {
+                            update = setState;
+                            return SizedBox(
+                              height: height,
+                              child: const TText('dynamic'),
+                            );
+                          },
+                        ),
+                      ),
+                      const TTabBarMenuItem(value: 'plain'),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    expect(tester.getSize(find.byType(TTabBarMenuItem).first).height, 48);
+    update(() => height = 120);
+    await tester.pumpAndSettle();
+    expect(tester.getSize(find.byType(TTabBarMenuItem).first).height, 120);
+    expect(tester.getSize(find.byType(TTabBarMenuItem).last).height, 120);
+    update(() => height = 30);
+    await tester.pumpAndSettle();
+    expect(tester.getSize(find.byType(TTabBarMenuItem).first).height, 48);
+    expect(tester.getSize(find.byType(TTabBarMenuItem).last).height, 48);
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final dark in [false, true]) {
+    for (final scale in [1.0, 2.0]) {
+      for (final wrapper in ['direct', 'row', 'padding', 'builder']) {
+        testWidgets('slot tabbar $wrapper dark=$dark scale=$scale', (
+          tester,
+        ) async {
+          await tester.pumpWidget(
+            slotHost(
+              Column(
+                children: [
+                  const TTabBarMenuItem(value: 'reference'),
+                  for (final variant in [
+                    'default',
+                    'native',
+                    'nativeLocal',
+                    'nativeExplicit',
+                    'partial',
+                    'explicit',
+                    'local',
+                    'paragraph',
+                  ])
+                    TTabBarMenuItem(
+                      value: variant,
+                      itemWidget: slotContent(variant, variant, wrapper),
+                    ),
+                ],
+              ),
+              dark,
+              scale,
+            ),
+          );
+          for (final variant in [
+            'default',
+            'native',
+            'nativeLocal',
+            'nativeExplicit',
+            'partial',
+            'explicit',
+            'local',
+            'paragraph',
+          ]) {
+            expectSlotStyle(tester, variant, 'reference', variant);
+          }
+          expect(tester.takeException(), isNull);
+        });
+      }
+    }
+  }
+  testWidgets('slot tabbar shared theme overrides defaults', (tester) async {
+    await tester.pumpWidget(
+      slotHost(
+        const Column(
+          children: [
+            TTabBarMenuItem(value: 'reference'),
+            TTabBarMenuItem(value: 'subject', itemWidget: TText('subject')),
+          ],
+        ),
+        false,
+        1,
+        outerStyle: const TextStyle(fontSize: 23, color: Colors.teal),
+      ),
+    );
+    expectSlotStyle(tester, 'subject', 'reference', 'default');
+    expect(slotParagraph(tester, 'subject').text.style!.fontSize, 23);
+  });
+  for (final scale in [1.0, 2.0]) {
+    for (final fixed in [false, true]) {
+      testWidgets(
+        'slot tabbar actual custom height scale=$scale fixed=$fixed',
+        (tester) async {
+          String? selected;
+          final key = GlobalKey();
+          await tester.pumpWidget(
+            MaterialApp(
+              theme: TThemeBuilder.light(TThemeData.defaultData()),
+              builder: (context, child) => MediaQuery(
+                data: MediaQuery.of(
+                  context,
+                ).copyWith(textScaler: TextScaler.linear(scale)),
+                child: child!,
+              ),
+
+              home: MediaQuery(
+                data: MediaQueryData(textScaler: TextScaler.linear(scale)),
+                child: Scaffold(
+                  body: Align(
+                    alignment: Alignment.bottomCenter,
+                    child: TTabBar(
+                      type: TTabBarType.doubleLayer,
+                      value: 0,
+                      useSafeArea: false,
+                      navigationTabs: [
+                        TTabBarItemConfig(
+                          tabText: 'open',
+                          onTap: () {},
+                          popUpButtonConfig: TTabBarPopUpBtnConfig(
+                            onChanged: (value) => selected = value,
+                            popUpDialogConfig: TTabBarPopUpShapeConfig(
+                              popUpWidth: 160,
+                              popUpItemHeight: fixed ? 48 : null,
+                            ),
+                            items: [
+                              TTabBarMenuItem(
+                                value: 'custom',
+                                itemWidget: Padding(
+                                  padding: const EdgeInsets.all(8),
+                                  child: Builder(
+                                    builder: (context) => TText(
+                                      'First line\nSecond line\nThird line',
+                                      key: key,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const TTabBarMenuItem(value: 'plain'),
+                            ],
+                          ),
+                        ),
+                      ],
+                      onChanged: (_) {},
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+          await tester.tap(find.text('open'));
+          await tester.pumpAndSettle();
+          final rows = find.byType(TTabBarMenuItem);
+          final first = tester.getSize(rows.first).height;
+          final second = tester.getSize(rows.last).height;
+          expect(first, second);
+          if (fixed) {
+            expect(first, 48);
+          } else {
+            expect(first, greaterThan(48));
+            expect(
+              tester.getSize(find.byKey(key)).height + 16,
+              lessThanOrEqualTo(first + 0.01),
+            );
+          }
+          expect(tester.takeException(), isNull);
+          await tester.tap(find.text('plain'));
+          await tester.pumpAndSettle();
+          expect(selected, 'plain');
+          expect(find.byType(TTabBarMenuItem), findsNothing);
+        },
+      );
+    }
+  }
+  testWidgets(
+    'slot tabbar tall custom menu scrolls without duplicating state',
+    (tester) async {
+      var mounts = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Align(
+              alignment: Alignment.bottomCenter,
+              child: TTabBar(
+                type: TTabBarType.doubleLayer,
+                value: 0,
+                useSafeArea: false,
+                onChanged: (_) {},
+                navigationTabs: [
+                  TTabBarItemConfig(
+                    tabText: 'open',
+                    onTap: () {},
+                    popUpButtonConfig: TTabBarPopUpBtnConfig(
+                      onChanged: (_) {},
+                      items: [
+                        TTabBarMenuItem(
+                          value: 'tall',
+                          itemWidget: _SlotMountProbe(onMount: () => mounts++),
+                        ),
+                        const TTabBarMenuItem(value: 'last'),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      expect(mounts, 1);
+      final scroll = find.byType(SingleChildScrollView);
+      expect(scroll, findsOneWidget);
+      expect(tester.getTopLeft(scroll).dy, greaterThanOrEqualTo(0));
+      expect(tester.getBottomLeft(scroll).dy, lessThanOrEqualTo(600));
+      await tester.drag(scroll, const Offset(0, -1000));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.text('last'));
+      await tester.pumpAndSettle();
+      expect(find.byType(TTabBarMenuItem), findsNothing);
+    },
+  );
+}
+
+class _SlotMountProbe extends StatefulWidget {
+  const _SlotMountProbe({required this.onMount});
+  final VoidCallback onMount;
+  @override
+  State<_SlotMountProbe> createState() => _SlotMountProbeState();
+}
+
+class _SlotMountProbeState extends State<_SlotMountProbe> {
+  @override
+  void initState() {
+    super.initState();
+    widget.onMount();
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      const SizedBox(height: 400, child: Text('tall'));
+}
