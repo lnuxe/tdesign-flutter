@@ -597,7 +597,7 @@ class TThemeData extends ThemeExtension<TThemeData> {
     TExtraThemeData? extraThemeData,
   }) {
     final copiedRefs = _copyMap<String>(refMap, null);
-    return TThemeData(
+    final copied = TThemeData(
       name: name ?? this.name,
       colorMap: _copyMap<Color>(this.colorMap, colorMap, copiedRefs),
       fontMap: _copyMap<Font>(this.fontMap, fontMap, copiedRefs),
@@ -627,6 +627,28 @@ class TThemeData extends ThemeExtension<TThemeData> {
       refMap: copiedRefs,
       extraThemeData: extraThemeData ?? this.extraThemeData,
     );
+    copied.light = copied;
+    // 亮暗成对的主题在 copyWith 后必须保持成对，否则 TThemeBuilder.dark
+    // 会静默回退到亮色 Token（`token.dark ?? token`）。暗色主题沿用同一批
+    // 覆盖，这样 copyWith 的改动在两种模式下都生效。（issue #1228）
+    final sourceDark = dark;
+    if (sourceDark != null) {
+      final copiedDark = sourceDark.copyWith(
+        colorMap: colorMap,
+        fontMap: fontMap,
+        fontMetricMap: fontMetricMap,
+        radiusMap: radiusMap,
+        fontFamilyMap: fontFamilyMap,
+        shadowMap: shadowMap,
+        insetShadowMap: insetShadowMap,
+        spacerMap: spacerMap,
+        sizeMap: sizeMap,
+        extraThemeData: extraThemeData,
+      );
+      copiedDark.light = copied;
+      copied.dark = copiedDark;
+    }
+    return copied;
   }
 
   /// 拷贝Map,防止内层
